@@ -29,8 +29,9 @@ from scipy.io import wavfile
 from transformers import pipeline
 from cached_path import cached_path
 from f5_tts.api import F5TTS
-from f5_tts.model.utils import convert_char_to_pinyin
+from f5_tts.model.utils import convert_char_to_pinyin, convent_to_pinyin
 from importlib.resources import files
+
 
 training_process = None
 system = platform.system()
@@ -758,11 +759,11 @@ def get_correct_audio_path(
     # Case 2: If it has a supported extension but is not a full path
     elif has_supported_extension(audio_input) and not os.path.isabs(audio_input):
         file_audio = os.path.join(base_path, audio_input)
-        print("2")
+        # print("2")
 
     # Case 3: If only the name is given (no extension and not a full path)
     elif not has_supported_extension(audio_input) and not os.path.isabs(audio_input):
-        print("3")
+        # print("3")
         for ext in supported_formats:
             potential_file = os.path.join(base_path, f"{audio_input}.{ext}")
             if os.path.exists(potential_file):
@@ -815,14 +816,15 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
             print(f"Error processing {file_audio}: {e}")
             continue
 
-        if duration < 1 or duration > 25:
-            error_files.append([file_audio, "duration < 1 or > 25 "])
+        if duration < 1 or duration > 29:
+            error_files.append([file_audio, "duration < 1 or > 29 "])
             continue
         if len(text) < 4:
             error_files.append([file_audio, "very small text len 3"])
             continue
 
-        text = clear_text(text)
+        # text = clear_text(text)
+        text = convent_to_pinyin("泰语", text)
         text = convert_char_to_pinyin([text], polyphone=True)[0]
 
         audio_path_list.append(file_audio)
@@ -1144,11 +1146,19 @@ def vocab_check(project_name):
             continue
 
         text = sp[1].lower().strip()
-
-        for t in text:
+        # 在这里进行转换，然后通过空格拆分
+        text_pinyin = convent_to_pinyin("泰语", text)
+        texts = text_pinyin.split(" ")
+        for t in texts:
+            # print(t)
             if t not in vocab and t not in miss_symbols_keep:
                 miss_symbols.append(t)
                 miss_symbols_keep[t] = t
+
+        # for t in text:
+        #     if t not in vocab and t not in miss_symbols_keep:
+        #         miss_symbols.append(t)
+        #         miss_symbols_keep[t] = t
 
     if miss_symbols == []:
         vocab_miss = ""
@@ -1238,6 +1248,7 @@ def infer(project, file_checkpoint, exp_name, ref_text, ref_audio, gen_text, nfe
         print("update >> ", device_test, file_checkpoint, use_ema)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        # tts_api.infer(gen_text=convent_to_pinyin("泰语", gen_text), ref_text=convent_to_pinyin("泰语", ref_text), ref_file=ref_audio, nfe_step=nfe_step, file_wave=f.name)
         tts_api.infer(gen_text=gen_text, ref_text=ref_text, ref_file=ref_audio, nfe_step=nfe_step, file_wave=f.name)
         return f.name, tts_api.device
 

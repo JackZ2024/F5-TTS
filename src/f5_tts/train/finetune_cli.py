@@ -2,6 +2,9 @@ import argparse
 import os
 import shutil
 
+import sys
+sys.path.append(os.getcwd() + "/src")
+
 from cached_path import cached_path
 from f5_tts.model import CFM, UNetT, DiT, Trainer
 from f5_tts.model.utils import get_tokenizer

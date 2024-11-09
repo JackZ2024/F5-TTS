@@ -27,6 +27,7 @@ from f5_tts.model import CFM
 from f5_tts.model.utils import (
     get_tokenizer,
     convert_char_to_pinyin,
+    convent_to_pinyin,
 )
 
 _ref_audio_cache = {}
@@ -404,6 +405,8 @@ def infer_batch_process(
         ref_text = ref_text + " "
     for i, gen_text in enumerate(progress.tqdm(gen_text_batches)):
         # Prepare the text
+        # ref_text = convent_to_pinyin("泰语", ref_text)
+        # gen_text = convent_to_pinyin("泰语", gen_text)
         text_list = [ref_text + gen_text]
         final_text_list = convert_char_to_pinyin(text_list)
 
