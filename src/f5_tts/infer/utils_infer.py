@@ -32,6 +32,8 @@ from f5_tts.model.utils import (
 _ref_audio_cache = {}
 
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+if device == "mps":
+    os.environ["PYTOCH_ENABLE_MPS_FALLBACK"] = "1"
 
 # -----------------------------------------
 
@@ -192,7 +194,7 @@ def load_model(
     tokenizer = "custom"
 
     print("\nvocab : ", vocab_file)
-    print("tokenizer : ", tokenizer)
+    print("token : ", tokenizer)
     print("model : ", ckpt_path, "\n")
 
     vocab_char_map, vocab_size = get_tokenizer(vocab_file, tokenizer)
