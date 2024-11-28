@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "f5-tts"
-version = "0.1.1"
+version = "0.1.2"
 description = "F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching"
 readme = "README.md"
 license = {text = "MIT License"}
@@ -15,7 +15,7 @@ classifiers = [
 ]
 dependencies = [
     "accelerate>=0.33.0",
-    "bitsandbytes>0.37.0",
+    "bitsandbytes>0.37.0; platform_machine != 'arm64' and platform_system != 'Darwin'",
     "cached_path",
     "click",
     "datasets",

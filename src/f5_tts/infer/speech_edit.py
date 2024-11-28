@@ -1,5 +1,7 @@
 import os
 
+os.environ["PYTOCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
+
 import torch
 import torch.nn.functional as F
 import torchaudio
@@ -187,5 +189,5 @@ with torch.inference_mode():
         generated_wave = generated_wave * rms / target_rms
 
     save_spectrogram(gen_mel_spec[0].cpu().numpy(), f"{output_dir}/speech_edit_out.png")
-    torchaudio.save(f"{output_dir}/speech_edit_out.wav", generated_wave.squeeze(0).cpu(), target_sample_rate)
+    torchaudio.save(f"{output_dir}/speech_edit_out.wav", generated_wave.cpu(), target_sample_rate)
     print(f"Generated wav: {generated_wave.shape}")

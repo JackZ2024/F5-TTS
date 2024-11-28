@@ -10,7 +10,6 @@ from torch.nn.utils.rnn import pad_sequence
 
 import jieba
 from pypinyin import lazy_pinyin, Style
-import pythainlp
 from Han_solo import han_solo
 
 # seed everything
@@ -145,7 +144,8 @@ def convert_char_to_pinyin(text_list, polyphone=True, lang=""):
         text = text.translate(god_knows_why_en_testset_contains_zh_quote)
         text = text.translate(custom_trans)
         if lang == "thai":
-            texts = han_solo.cut(text)
+            # texts = han_solo.cut(text)
+            texts = text
             for seg in texts:
                 seg_byte_len = len(bytes(seg, "UTF-8"))
                 if seg_byte_len == len(seg):  # if pure alphabets and symbols

@@ -18,6 +18,8 @@
 - [Multilingual](#multilingual)
     - [F5-TTS Base @ pretrain @ zh \& en](#f5-tts-base--pretrain--zh--en)
 - [Mandarin](#mandarin)
+- [Japanese](#japanese)
+    - [F5-TTS Base @ pretrain/finetune @ ja](#f5-tts-base--pretrainfinetune--ja)
 - [English](#english)
 - [French](#french)
     - [French LibriVox @ finetune @ fr](#french-librivox--finetune--fr)
@@ -40,6 +42,17 @@ VOCAB_FILE: hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt
 
 ## Mandarin
 
+## Japanese
+
+#### F5-TTS Base @ pretrain/finetune @ ja
+|Model|🤗Hugging Face|Data (Hours)|Model License|
+|:---:|:------------:|:-----------:|:-------------:|
+|F5-TTS Base|[ckpt & vocab](https://huggingface.co/Jmica/F5TTS/tree/main/JA_8500000)|[Emilia 1.7k JA](https://huggingface.co/datasets/amphion/Emilia-Dataset/tree/fc71e07) & [Galgame Dataset 5.4k](https://huggingface.co/datasets/OOPPEENN/Galgame_Dataset)|cc-by-nc-4.0|
+
+```bash
+MODEL_CKPT: hf://Jmica/F5TTS/JA_8500000/model_8499660.pt
+VOCAB_FILE: hf://Jmica/F5TTS/JA_8500000/vocab_updated.txt
+```
 
 ## English
 
@@ -56,6 +69,6 @@ MODEL_CKPT: hf://RASPIAUDIO/F5-French-MixedSpeakers-reduced/model_last_reduced.p
 VOCAB_FILE: hf://RASPIAUDIO/F5-French-MixedSpeakers-reduced/vocab.txt
 ```
 
-- Online Inference with [Hugging Face Space](https://huggingface.co/spaces/RASPIAUDIO/f5-tts_french).
+- [Online Inference with Hugging Face Space](https://huggingface.co/spaces/RASPIAUDIO/f5-tts_french).
 - [Tutorial video to train a new language model](https://www.youtube.com/watch?v=UO4usaOojys).
 - [Discussion about this training can be found here](https://github.com/SWivid/F5-TTS/issues/434).

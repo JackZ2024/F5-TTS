@@ -3,7 +3,6 @@ import sys
 from importlib.resources import files
 
 import soundfile as sf
-import torch
 import tqdm
 from cached_path import cached_path
 
@@ -15,6 +14,7 @@ from f5_tts.infer.utils_infer import (
     preprocess_ref_audio_text,
     remove_silence_for_generated_wav,
     save_spectrogram,
+    transcribe,
     target_sample_rate,
 )
 from f5_tts.model import DiT, UNetT
@@ -32,6 +32,7 @@ class F5TTS:
         vocoder_name="vocos",
         local_path=None,
         device=None,
+        hf_cache_dir=None,
     ):
         # Initialize parameters
         self.final_wave = None
@@ -41,29 +42,40 @@ class F5TTS:
         self.mel_spec_type = vocoder_name
 
         # Set device
-        self.device = device or (
-            "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-        )
+        if device is not None:
+            self.device = device
+        else:
+            import torch
+
+            self.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
         # Load models
-        self.load_vocoder_model(vocoder_name, local_path)
-        self.load_ema_model(model_type, ckpt_file, vocoder_name, vocab_file, ode_method, use_ema)
+        self.load_vocoder_model(vocoder_name, local_path=local_path, hf_cache_dir=hf_cache_dir)
+        self.load_ema_model(
+            model_type, ckpt_file, vocoder_name, vocab_file, ode_method, use_ema, hf_cache_dir=hf_cache_dir
+        )
 
-    def load_vocoder_model(self, vocoder_name, local_path):
-        self.vocoder = load_vocoder(vocoder_name, local_path is not None, local_path, self.device)
+    def load_vocoder_model(self, vocoder_name, local_path=None, hf_cache_dir=None):
+        self.vocoder = load_vocoder(vocoder_name, local_path is not None, local_path, self.device, hf_cache_dir)
 
-    def load_ema_model(self, model_type, ckpt_file, mel_spec_type, vocab_file, ode_method, use_ema):
+    def load_ema_model(self, model_type, ckpt_file, mel_spec_type, vocab_file, ode_method, use_ema, hf_cache_dir=None):
         if model_type == "F5-TTS":
             if not ckpt_file:
                 if mel_spec_type == "vocos":
-                    ckpt_file = str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))
+                    ckpt_file = str(
+                        cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors", cache_dir=hf_cache_dir)
+                    )
                 elif mel_spec_type == "bigvgan":
-                    ckpt_file = str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base_bigvgan/model_1250000.pt"))
+                    ckpt_file = str(
+                        cached_path("hf://SWivid/F5-TTS/F5TTS_Base_bigvgan/model_1250000.pt", cache_dir=hf_cache_dir)
+                    )
             model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
             model_cls = DiT
         elif model_type == "E2-TTS":
             if not ckpt_file:
-                ckpt_file = str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))
+                ckpt_file = str(
+                    cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors", cache_dir=hf_cache_dir)
+                )
             model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4)
             model_cls = UNetT
         else:
@@ -72,6 +84,9 @@ class F5TTS:
         self.ema_model = load_model(
             model_cls, model_cfg, ckpt_file, mel_spec_type, vocab_file, ode_method, use_ema, self.device
         )
+
+    def transcribe(self, ref_audio, language=None):
+        return transcribe(ref_audio, language)
 
     def export_wav(self, wav, file_wave, remove_silence=False):
         sf.write(file_wave, wav, self.target_sample_rate)
