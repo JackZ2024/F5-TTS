@@ -31,7 +31,7 @@ from f5_tts.api import F5TTS
 from f5_tts.model.utils import convert_char_to_pinyin
 from f5_tts.infer.utils_infer import transcribe
 from importlib.resources import files
-
+# from Han_solo import han_solo
 
 training_process = None
 system = platform.system()
@@ -452,7 +452,8 @@ def start_training(
         f"--dataset_name {dataset_name}"
     )
 
-    cmd += f" --finetune {finetune}"
+    if finetune:
+        cmd += f" --finetune {finetune}"
 
     if file_checkpoint_train != "":
         cmd += f" --pretrain {file_checkpoint_train}"
@@ -800,9 +801,9 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
             print(f"Error processing {file_audio}: {e}")
             continue
 
-        if duration < 1 or duration > 25:
+        if duration < 1 or duration > 35:
             if duration > 25:
-                error_files.append([file_audio, "duration > 25 sec"])
+                error_files.append([file_audio, "duration > 35 sec"])
             if duration < 1:
                 error_files.append([file_audio, "duration < 1 sec "])
             continue
@@ -811,7 +812,7 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
             continue
 
         text = clear_text(text)
-        text = convert_char_to_pinyin([text], polyphone=True)[0]
+        text = convert_char_to_pinyin([text], polyphone=True, lang="thai")[0]
 
         audio_path_list.append(file_audio)
         duration_list.append(duration)
@@ -1132,8 +1133,9 @@ def vocab_check(project_name):
             continue
 
         text = sp[1].lower().strip()
-
-        for t in text:
+        # 在这里进行转换，然后通过空格拆分
+        texts = convert_char_to_pinyin([text], polyphone=True, lang="thai")[0]
+        for t in texts:
             if t not in vocab and t not in miss_symbols_keep:
                 miss_symbols.append(t)
                 miss_symbols_keep[t] = t
