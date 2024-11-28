@@ -70,8 +70,10 @@ def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
     return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path)
 
 
-F5TTS_ema_model = load_f5tts()
-E2TTS_ema_model = load_e2tts() if USING_SPACES else None
+# F5TTS_ema_model = load_f5tts()
+F5TTS_ema_model = None
+# E2TTS_ema_model = load_e2tts() if USING_SPACES else None
+E2TTS_ema_model = None
 custom_ema_model, pre_custom_path = None, ""
 
 chat_model_state = None
@@ -776,25 +778,25 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
     with gr.Row():
         if not USING_SPACES:
             choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
+                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="Choose TTS Model", value="Custom"
             )
         else:
             choose_tts_model = gr.Radio(
                 choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
             )
         custom_ckpt_path = gr.Dropdown(
-            choices=["hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"],
+            choices=["./model/model_1200k.safetensors"],
             value=load_last_used_custom()[0],
             allow_custom_value=True,
             label="MODEL CKPT: local_path | hf://user_id/repo_id/model_ckpt",
-            visible=False,
+            visible=True,
         )
         custom_vocab_path = gr.Dropdown(
-            choices=["hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt"],
+            choices=["./model/vocab.txt"],
             value=load_last_used_custom()[1],
             allow_custom_value=True,
             label="VOCAB FILE: local_path | hf://user_id/repo_id/vocab_file",
-            visible=False,
+            visible=True,
         )
 
     choose_tts_model.change(
