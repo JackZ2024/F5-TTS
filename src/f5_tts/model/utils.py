@@ -10,7 +10,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 import jieba
 from pypinyin import lazy_pinyin, Style
-from Han_solo import han_solo
+# from Han_solo import han_solo
 
 # seed everything
 

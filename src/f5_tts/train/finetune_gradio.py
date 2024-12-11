@@ -31,7 +31,6 @@ from f5_tts.api import F5TTS
 from f5_tts.model.utils import convert_char_to_pinyin
 from f5_tts.infer.utils_infer import transcribe
 from importlib.resources import files
-# from Han_solo import han_solo
 
 training_process = None
 system = platform.system()
