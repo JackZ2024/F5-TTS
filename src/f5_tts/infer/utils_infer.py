@@ -138,7 +138,11 @@ asr_pipe = None
 def initialize_asr_pipeline(device: str = device, dtype=None):
     if dtype is None:
         dtype = (
-            torch.float16 if "cuda" in device and torch.cuda.get_device_properties(device).major >= 6 else torch.float32
+            torch.float16
+            if "cuda" in device
+            and torch.cuda.get_device_properties(device).major >= 6
+            and not torch.cuda.get_device_name().endswith("[ZLUDA]")
+            else torch.float32
         )
     global asr_pipe
     asr_pipe = pipeline(
@@ -171,7 +175,11 @@ def transcribe(ref_audio, language=None):
 def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
     if dtype is None:
         dtype = (
-            torch.float16 if "cuda" in device and torch.cuda.get_device_properties(device).major >= 6 else torch.float32
+            torch.float16
+            if "cuda" in device
+            and torch.cuda.get_device_properties(device).major >= 6
+            and not torch.cuda.get_device_name().endswith("[ZLUDA]")
+            else torch.float32
         )
     model = model.to(dtype)
 
@@ -338,7 +346,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
         else:
             ref_text += ". "
 
-    print("ref_text  ", ref_text)
+    print("\nref_text  ", ref_text)
 
     return ref_audio, ref_text
 
@@ -370,6 +378,7 @@ def infer_process(
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
+    print("\n")
 
     show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return infer_batch_process(
