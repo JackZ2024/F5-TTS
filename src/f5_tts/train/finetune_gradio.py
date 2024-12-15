@@ -809,9 +809,11 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
         if len(text) < 3:
             error_files.append([file_audio, "very small text len 3"])
             continue
-
+        
+        lang = name_project.split("_")[0]
+        lang = re.sub(r'\d+$', '', lang)
         text = clear_text(text)
-        text = convert_char_to_pinyin([text], polyphone=True, lang="thai")[0]
+        text = convert_char_to_pinyin([text], polyphone=True, lang=lang)[0]
 
         audio_path_list.append(file_audio)
         duration_list.append(duration)
@@ -1133,7 +1135,9 @@ def vocab_check(project_name):
 
         text = sp[1].lower().strip()
         # 在这里进行转换，然后通过空格拆分
-        texts = convert_char_to_pinyin([text], polyphone=True, lang="thai")[0]
+        lang = project_name.split("_")[0]
+        lang = re.sub(r'\d+$', '', lang)
+        texts = convert_char_to_pinyin([text], polyphone=True, lang=lang)[0]
         for t in texts:
             if t not in vocab and t not in miss_symbols_keep:
                 miss_symbols.append(t)

@@ -10,7 +10,6 @@ from torch.nn.utils.rnn import pad_sequence
 
 import jieba
 from pypinyin import lazy_pinyin, Style
-# from Han_solo import han_solo
 
 # seed everything
 
@@ -151,8 +150,7 @@ def convert_char_to_pinyin(text_list, polyphone=True, lang=""):
     for text in text_list:
         char_list = []
         text = text.translate(custom_trans)
-        if lang == "thai":
-            # texts = han_solo.cut(text)
+        if lang.lower() == "thai":
             texts = text
             for seg in texts:
                 seg_byte_len = len(bytes(seg, "UTF-8"))
