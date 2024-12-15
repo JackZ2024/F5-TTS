@@ -5,6 +5,7 @@ import re
 import tempfile
 from collections import OrderedDict
 from importlib.resources import files
+import os
 
 import click
 import gradio as gr
@@ -13,6 +14,7 @@ import soundfile as sf
 import torchaudio
 from cached_path import cached_path
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from pydub import AudioSegment
 
 try:
     import spaces
@@ -43,18 +45,23 @@ from f5_tts.infer.utils_infer import (
 DEFAULT_TTS_MODEL = "F5-TTS"
 tts_model_choice = DEFAULT_TTS_MODEL
 
+# 在这里添加语言的中英对照，英文不区分大小写
+languages = {"泰语":"thai", "默认":""}
+
 
 # load models
 
 vocoder = load_vocoder()
 
 
-def load_f5tts(ckpt_path=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))):
+def load_f5tts():
+    ckpt_path=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))
     F5TTS_model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
     return load_model(DiT, F5TTS_model_cfg, ckpt_path)
 
 
-def load_e2tts(ckpt_path=str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))):
+def load_e2tts():
+    ckpt_path=str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))
     E2TTS_model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4)
     return load_model(UNetT, E2TTS_model_cfg, ckpt_path)
 
@@ -70,8 +77,8 @@ def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
     return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path)
 
 
-F5TTS_ema_model = load_f5tts()
-E2TTS_ema_model = load_e2tts() if USING_SPACES else None
+F5TTS_ema_model = None
+E2TTS_ema_model = None
 custom_ema_model, pre_custom_path = None, ""
 
 chat_model_state = None
@@ -103,11 +110,14 @@ def generate_response(messages, model, tokenizer):
 
 @gpu_decorator
 def infer(
-    ref_audio_orig, ref_text, gen_text, model, remove_silence, cross_fade_duration=0.15, speed=1, show_info=gr.Info
+    ref_audio_orig, ref_text, gen_texts, model, remove_silence, cross_fade_duration=0.15, speed=1, show_info=gr.Info, lang=""
 ):
     ref_audio, ref_text = preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=show_info)
 
     if model == "F5-TTS":
+        if F5TTS_ema_model is None:
+            show_info("Loading F5-TTS model...")
+            F5TTS_ema_model = load_f5tts()
         ema_model = F5TTS_ema_model
     elif model == "E2-TTS":
         global E2TTS_ema_model
@@ -124,24 +134,56 @@ def infer(
             pre_custom_path = model[1]
         ema_model = custom_ema_model
 
-    final_wave, final_sample_rate, combined_spectrogram = infer_process(
-        ref_audio,
-        ref_text,
-        gen_text,
-        ema_model,
-        vocoder,
-        cross_fade_duration=cross_fade_duration,
-        speed=speed,
-        show_info=show_info,
-        progress=gr.Progress(),
-    )
+    wav_24K_files = []
+    for i in range(len(gen_texts)):
+        gen_text = gen_texts[i]
+        if gen_text == "":
+            continue
+        final_wave, final_sample_rate, combined_spectrogram = infer_process(
+            ref_audio,
+            ref_text,
+            gen_text,
+            ema_model,
+            vocoder,
+            cross_fade_duration=cross_fade_duration,
+            speed=speed,
+            show_info=show_info,
+            progress=gr.Progress(),
+            lang=lang
+        )
+
+        if not os.path.exists("24K"):
+            os.mkdir("24K")
+        audio_filepath = f"24K/24khz_{i}.wav"
+        sf.write(audio_filepath, final_wave, final_sample_rate, 'PCM_24')
+        # 把文件路径放到列表里面，就不用自己再遍历了
+        wav_24K_files.append(audio_filepath)
+
+    # 下面是合并音频，24k与48k的都合并
+    audio_24K = None
+    if len(wav_24K_files) > 0:
+        audio_24K = AudioSegment.from_file(wav_24K_files[0]) 
+
+    for i in range(1, len(wav_24K_files)):
+        audio_24K += AudioSegment.from_file(wav_24K_files[i]) 
+
+    # 导出合并后的24Khz音频
+    audio_24K_path = "ret_audio/audio_24Khz.wav"
+    if audio_24K:
+        if not os.path.exists("ret_audio"):
+            os.mkdir("ret_audio")
+        audio_24K.export(audio_24K_path, format="wav", parameters=["-c:a", "pcm_s24le"])
+
+    # 下面是RVC转换
+
 
     # Remove silence
-    if remove_silence:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-            sf.write(f.name, final_wave, final_sample_rate)
-            remove_silence_for_generated_wav(f.name)
-            final_wave, _ = torchaudio.load(f.name)
+    if remove_silence and audio_24K:
+        remove_silence_for_generated_wav(audio_24K_path)
+        final_wave, _ = torchaudio.load(audio_24K_path)
+        final_wave = final_wave.squeeze().cpu().numpy()
+    elif audio_24K:
+        final_wave, _ = torchaudio.load(audio_24K_path)
         final_wave = final_wave.squeeze().cpu().numpy()
 
     # Save the spectrogram
@@ -151,6 +193,19 @@ def infer(
 
     return (final_sample_rate, final_wave), spectrogram_path, ref_text
 
+
+def create_textboxes(num):
+    try:
+        num = int(num)
+        if num <= 0:
+            return [gr.update(visible=False) for _ in range(20)]
+        
+        # 控制输入框的可见性，最多支持 20 个
+        updates = [gr.update(visible=True) if i < num else gr.update(visible=False) for i in range(20)]
+        return updates
+    except ValueError:
+        return [gr.update(visible=False) for _ in range(20)]
+    
 
 with gr.Blocks() as app_credits:
     gr.Markdown("""
@@ -163,21 +218,46 @@ with gr.Blocks() as app_credits:
 with gr.Blocks() as app_tts:
     gr.Markdown("# Batched TTS")
     ref_audio_input = gr.Audio(label="Reference Audio", type="filepath")
-    gen_text_input = gr.Textbox(label="Text to Generate", lines=10)
-    generate_btn = gr.Button("Synthesize", variant="primary")
-    with gr.Accordion("Advanced Settings", open=False):
+    with gr.Row():
+        num_input = gr.Textbox(label="请输入需要的输入框数量(1-20)", value="5")
+        generate_textbox_btn = gr.Button("生成输入框")
+        # 在这里添加新语言的支持，记得在languages里添加语言的英文对照
+        language = gr.Dropdown(
+            choices=["泰语", "默认"], value="泰语", label="语言", allow_custom_value=True
+        )
+
+    # 动态布局区域
+    rows = []
+    max_per_row = 5
+    textboxes = []
+
+    # 创建一个动态布局，最多 20 个输入框
+    for i in range(4):  # 每行最多 5 个，4 行总共 20 个
+        with gr.Row() as row:
+            for j in range(max_per_row):
+                index = i * max_per_row + j
+                if index == 0:
+                    textbox = gr.Textbox(label=f"生成文本:{index+1}", lines=10, visible=True)
+                else:
+                    textbox = gr.Textbox(label=f"生成文本:{index+1}", lines=10, visible=False)
+                textboxes.append(textbox)
+            rows.append(row)
+    generate_textbox_btn.click(create_textboxes, inputs=[num_input], outputs=textboxes)
+
+    generate_btn = gr.Button("合成", variant="primary")
+    with gr.Accordion("高级设置", open=False):
         ref_text_input = gr.Textbox(
-            label="Reference Text",
-            info="Leave blank to automatically transcribe the reference audio. If you enter text it will override automatic transcription.",
+            label="参考音频对应文本",
+            info="如果留空则自动转录生成. 如果输入文本，则使用输入的文本，建议输入标准文本，转录出来的文本准确性可能不高。",
             lines=2,
         )
         remove_silence = gr.Checkbox(
-            label="Remove Silences",
+            label="删除静音",
             info="The model tends to produce silences, especially on longer audio. We can manually remove silences if needed. Note that this is an experimental feature and may produce strange results. This will also increase generation time.",
             value=False,
         )
         speed_slider = gr.Slider(
-            label="Speed",
+            label="语速设置",
             minimum=0.3,
             maximum=2.0,
             value=1.0,
@@ -193,39 +273,36 @@ with gr.Blocks() as app_tts:
             info="Set the duration of the cross-fade between audio clips.",
         )
 
-    audio_output = gr.Audio(label="Synthesized Audio")
+    audio_output = gr.Audio(label="合成音频")
     spectrogram_output = gr.Image(label="Spectrogram")
 
     @gpu_decorator
     def basic_tts(
         ref_audio_input,
         ref_text_input,
-        gen_text_input,
         remove_silence,
         cross_fade_duration_slider,
         speed_slider,
+        lang,
+        *gen_texts_input,
     ):
+        lang = languages.get(lang, lang)
         audio_out, spectrogram_path, ref_text_out = infer(
             ref_audio_input,
             ref_text_input,
-            gen_text_input,
+            gen_texts_input,
             tts_model_choice,
             remove_silence,
             cross_fade_duration_slider,
             speed_slider,
+            lang=lang
         )
         return audio_out, spectrogram_path, gr.update(value=ref_text_out)
 
+    intputs = [ref_audio_input, ref_text_input,remove_silence,cross_fade_duration_slider,speed_slider,language] + textboxes
     generate_btn.click(
         basic_tts,
-        inputs=[
-            ref_audio_input,
-            ref_text_input,
-            gen_text_input,
-            remove_silence,
-            cross_fade_duration_slider,
-            speed_slider,
-        ],
+        inputs=intputs,
         outputs=[audio_output, spectrogram_output, ref_text_input],
     )
 
@@ -729,18 +806,10 @@ Have a conversation with an AI using your reference voice!
 with gr.Blocks() as app:
     gr.Markdown(
         """
-# E2/F5 TTS
+# 自定义 F5 TTS
 
-This is a local web UI for F5 TTS with advanced batch processing support. This app supports the following TTS models:
+这是我们修改过的F5-TTS，目前支持泰语音频的生成。
 
-* [F5-TTS](https://arxiv.org/abs/2410.06885) (A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching)
-* [E2 TTS](https://arxiv.org/abs/2406.18009) (Embarrassingly Easy Fully Non-Autoregressive Zero-Shot TTS)
-
-The checkpoints currently support English and Chinese.
-
-If you're having issues, try converting your reference audio to WAV or MP3, clipping it to 15s with  ✂  in the bottom right corner (otherwise might have non-optimal auto-trimmed result).
-
-**NOTE: Reference text will be automatically transcribed with Whisper if not provided. For best results, keep your reference clips short (<15s). Ensure the audio is fully uploaded before generating.**
 """
     )
 
@@ -776,25 +845,25 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
     with gr.Row():
         if not USING_SPACES:
             choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
+                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="选择 TTS 模型", value="Custom"
             )
         else:
             choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
+                choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="选择 TTS 模型", value=DEFAULT_TTS_MODEL
             )
         custom_ckpt_path = gr.Dropdown(
-            choices=["hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"],
+            choices=["./model/model_1200k.safetensors"],
             value=load_last_used_custom()[0],
             allow_custom_value=True,
-            label="MODEL CKPT: local_path | hf://user_id/repo_id/model_ckpt",
-            visible=False,
+            label="模型位置: model_1200k.safetensors",
+            visible=True,
         )
         custom_vocab_path = gr.Dropdown(
-            choices=["hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt"],
+            choices=["./model/vocab.txt"],
             value=load_last_used_custom()[1],
             allow_custom_value=True,
-            label="VOCAB FILE: local_path | hf://user_id/repo_id/vocab_file",
-            visible=False,
+            label="VOCAB 文件位置:  vocab.txt",
+            visible=True,
         )
 
     choose_tts_model.change(
@@ -813,6 +882,7 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
         inputs=[custom_ckpt_path, custom_vocab_path],
         show_progress="hidden",
     )
+    switch_tts_model("Custom")
 
     gr.TabbedInterface(
         [app_tts, app_multistyle, app_chat, app_credits],
