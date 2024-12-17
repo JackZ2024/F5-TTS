@@ -191,7 +191,7 @@ def infer(
         spectrogram_path = tmp_spectrogram.name
         save_spectrogram(combined_spectrogram, spectrogram_path)
 
-    return (final_sample_rate, final_wave), spectrogram_path, ref_text
+    return (final_sample_rate, final_wave), spectrogram_path, ref_text, audio_24K_path
 
 
 def create_textboxes(num):
@@ -275,6 +275,7 @@ with gr.Blocks() as app_tts:
 
     audio_output = gr.Audio(label="合成音频")
     spectrogram_output = gr.Image(label="Spectrogram")
+    download_output = gr.File(label="下载文件")
 
     @gpu_decorator
     def basic_tts(
@@ -287,7 +288,7 @@ with gr.Blocks() as app_tts:
         *gen_texts_input,
     ):
         lang = languages.get(lang, lang)
-        audio_out, spectrogram_path, ref_text_out = infer(
+        audio_out, spectrogram_path, ref_text_out, audio_24k_path = infer(
             ref_audio_input,
             ref_text_input,
             gen_texts_input,
@@ -297,13 +298,13 @@ with gr.Blocks() as app_tts:
             speed_slider,
             lang=lang
         )
-        return audio_out, spectrogram_path, gr.update(value=ref_text_out)
+        return audio_out, spectrogram_path, gr.update(value=ref_text_out), gr.update(value=audio_24k_path)
 
     intputs = [ref_audio_input, ref_text_input,remove_silence,cross_fade_duration_slider,speed_slider,language] + textboxes
     generate_btn.click(
         basic_tts,
         inputs=intputs,
-        outputs=[audio_output, spectrogram_output, ref_text_input],
+        outputs=[audio_output, spectrogram_output, ref_text_input, download_output],
     )
 
 
