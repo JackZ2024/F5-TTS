@@ -140,7 +140,8 @@ print("Word segmentation module jieba initialized.\n")
 def convert_char_to_pinyin(text_list, polyphone=True):
     final_text_list = []
     custom_trans = str.maketrans(
-        {";": ",", "“": '"', "”": '"', "‘": "'", "’": "'"}
+        # {";": ",", "“": '"', "”": '"', "‘": "'", "’": "'"}
+        {"“": '', "”": '', "‘": "", "’": "", "\"": "", "'": ""}
     )  # add custom trans here, to address oov
 
     def is_chinese(c):
@@ -150,7 +151,7 @@ def convert_char_to_pinyin(text_list, polyphone=True):
 
     for text in text_list:
         char_list = []
-        text = text.translate(custom_trans)
+        text = text.translate(custom_trans).replace("...", "")
         for seg in jieba.cut(text):
             seg_byte_len = len(bytes(seg, "UTF-8"))
             if seg_byte_len == len(seg):  # if pure alphabets and symbols
