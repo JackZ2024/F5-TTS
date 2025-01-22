@@ -150,8 +150,68 @@ def load_settings(project_name):
             if "last_per_updates" not in settings:  # patch for backward compatibility, with before f992c4e
                 settings["last_per_updates"] = settings["last_per_steps"] // settings["grad_accumulation_steps"]
 
-    return settings
+    return  (
+        settings["exp_name"],
+        settings["learning_rate"],
+        settings["batch_size_per_gpu"],
+        settings["batch_size_type"],
+        settings["max_samples"],
+        settings["grad_accumulation_steps"],
+        settings["max_grad_norm"],
+        settings["epochs"],
+        settings["num_warmup_updates"],
+        settings["save_per_updates"],
+        settings["last_per_updates"],
+        settings["finetune"],
+        settings["file_checkpoint_train"],
+        settings["tokenizer_type"],
+        settings["tokenizer_file"],
+        settings["mixed_precision"],
+        settings["logger"],
+        settings["bnb_optimizer"],
+        settings["keep_last_n_checkpoints"],
+    )
 
+def load_settings_obj(project_name):
+    project_name = project_name.replace("_pinyin", "").replace("_char", "")
+    path_project = os.path.join(path_project_ckpts, project_name)
+    file_setting = os.path.join(path_project, "setting.json")
+
+    if not os.path.isfile(file_setting):
+        settings = {
+            "exp_name": "F5TTS_Base",
+            "learning_rate": 1e-05,
+            "batch_size_per_gpu": 1000,
+            "batch_size_type": "frame",
+            "max_samples": 64,
+            "grad_accumulation_steps": 1,
+            "max_grad_norm": 1,
+            "epochs": 100,
+            "num_warmup_updates": 2,
+            "save_per_updates": 300,
+            "keep_last_n_checkpoints": -1,
+            "last_per_updates": 100,
+            "finetune": True,
+            "file_checkpoint_train": "",
+            "tokenizer_type": "pinyin",
+            "tokenizer_file": "",
+            "mixed_precision": "none",
+            "logger": "wandb",
+            "bnb_optimizer": False,
+        }
+    else:
+        with open(file_setting, "r") as f:
+            settings = json.load(f)
+            if "logger" not in settings:
+                settings["logger"] = "wandb"
+            if "bnb_optimizer" not in settings:
+                settings["bnb_optimizer"] = False
+            if "keep_last_n_checkpoints" not in settings:
+                settings["keep_last_n_checkpoints"] = -1  # default to keep all checkpoints
+            if "last_per_updates" not in settings:  # patch for backward compatibility, with before f992c4e
+                settings["last_per_updates"] = settings["last_per_steps"] // settings["grad_accumulation_steps"]
+
+    return settings
 
 # Load metadata
 def get_audio_duration(audio_path):
@@ -1120,6 +1180,7 @@ def vocab_check(project_name):
             continue
 
         text = sp[1].lower().strip()
+        text = convert_char_to_pinyin([text], polyphone=True)[0]
 
         for t in text:
             if t not in vocab and t not in miss_symbols_keep:
@@ -1579,7 +1640,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                 stop_button = gr.Button("Stop Training", interactive=False)
 
             if projects_selelect is not None:
-                settings = load_settings(projects_selelect)
+                settings = load_settings_obj(projects_selelect)
 
                 exp_name.value = settings["exp_name"]
                 learning_rate.value = settings["learning_rate"]
