@@ -1766,6 +1766,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     epochs,
                     num_warmup_updates,
                     save_per_updates,
+                    keep_last_n_checkpoints,
                     last_per_updates,
                     ch_finetune,
                     file_checkpoint_train,
@@ -1773,6 +1774,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     tokenizer_file,
                     mixed_precision,
                     cd_logger,
+                    ch_8bit_adam
                 ]
 
                 return output_components
