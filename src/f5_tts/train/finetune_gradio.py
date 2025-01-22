@@ -1180,6 +1180,7 @@ def vocab_check(project_name):
             continue
 
         text = sp[1].lower().strip()
+        text = convert_char_to_pinyin([text], polyphone=True)[0]
 
         for t in text:
             if t not in vocab and t not in miss_symbols_keep:
