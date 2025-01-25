@@ -237,6 +237,7 @@ class Trainer:
                 vocoder_name=self.vocoder_name, is_local=self.is_local_vocoder, local_path=self.local_vocoder_path
             )
             target_sample_rate = self.accelerator.unwrap_model(self.model).mel_spec.target_sample_rate
+            hop_length = self.accelerator.unwrap_model(self.model).mel_spec.hop_length
             log_samples_path = f"{self.checkpoint_path}/samples"
             os.makedirs(log_samples_path, exist_ok=True)
 
@@ -361,13 +362,19 @@ class Trainer:
                     self.save_checkpoint(global_update)
 
                     if self.log_samples and self.accelerator.is_local_main_process:
-                        ref_audio_len = mel_lengths[0]
+                        def find_first_index_no_exceed_15s(lengths):
+                            try:
+                                return next(i for i, value in enumerate(lengths) if value <= 15 * target_sample_rate / hop_length)
+                            except StopIteration:
+                                return 0
+                        index = find_first_index_no_exceed_15s(mel_lengths)
+                        ref_audio_len = mel_lengths[index]
                         infer_text = [
-                            text_inputs[0] + ([" "] if isinstance(text_inputs[0], list) else " ") + text_inputs[0]
+                            text_inputs[index] + ([" "] if isinstance(text_inputs[index], list) else " ") + text_inputs[index]
                         ]
                         with torch.inference_mode():
                             generated, _ = self.accelerator.unwrap_model(self.model).sample(
-                                cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
+                                cond=mel_spec[index][:ref_audio_len].unsqueeze(0),
                                 text=infer_text,
                                 duration=ref_audio_len * 2,
                                 steps=nfe_step,
@@ -376,7 +383,7 @@ class Trainer:
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
-                            ref_mel_spec = batch["mel"][0].unsqueeze(0)
+                            ref_mel_spec = batch["mel"][index].unsqueeze(0)
                             if self.vocoder_name == "vocos":
                                 gen_audio = vocoder.decode(gen_mel_spec).cpu()
                                 ref_audio = vocoder.decode(ref_mel_spec).cpu()
@@ -390,6 +397,8 @@ class Trainer:
                         torchaudio.save(
                             f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
                         )
+                        with open(f"{log_samples_path}/info.txt", "a", encoding="utf-8") as file:
+                            file.write(f"{log_samples_path}/update_{global_update}_ref.wav ---> {text_inputs[index]}\n")
 
                 if global_update % self.last_per_updates == 0 and self.accelerator.sync_gradients:
                     self.save_checkpoint(global_update, last=True)
