@@ -59,7 +59,7 @@ cfg_strength = 2.0
 sway_sampling_coef = -1.0
 speed = 1.0
 fix_duration = None
-
+no_audio_ref = False
 # -----------------------------------------
 
 
@@ -301,7 +301,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
             non_silent_wave = AudioSegment.silent(duration=0)
             for non_silent_seg in non_silent_segs:
                 if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 15000:
-                    show_info("Audio is over 15s, clipping short. (1)")
+                    print("\033[31mAudio is over 15s, clipping short. (1)\033[0m")
                     break
                 non_silent_wave += non_silent_seg
 
@@ -313,7 +313,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
                 non_silent_wave = AudioSegment.silent(duration=0)
                 for non_silent_seg in non_silent_segs:
                     if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 15000:
-                        show_info("Audio is over 15s, clipping short. (2)")
+                        print("\033[31mAudio is over 15s, clipping short. (2)\033[0m")
                         break
                     non_silent_wave += non_silent_seg
 
@@ -322,7 +322,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
             # 3. if no proper silence found for clipping
             if len(aseg) > 15000:
                 aseg = aseg[:15000]
-                show_info("Audio is over 15s, clipping short. (3)")
+                print("\033[31mAudio is over 15s, clipping short. (3)\033[0m")
 
         aseg = remove_silence_edges(aseg) + AudioSegment.silent(duration=50)
         aseg.export(f.name, format="wav")
@@ -379,6 +379,7 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
+    no_audio_ref=no_audio_ref
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
@@ -387,6 +388,9 @@ def infer_process(
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
     print("\n")
+
+    if len(gen_text_batches) > 1:
+        print(f"\033[31mToo long gen text: {gen_text}\033[0m")
 
     show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return infer_batch_process(
@@ -405,6 +409,7 @@ def infer_process(
         speed=speed,
         fix_duration=fix_duration,
         device=device,
+        no_audio_ref=no_audio_ref
     )
 
 
@@ -427,6 +432,7 @@ def infer_batch_process(
     speed=1,
     fix_duration=None,
     device=None,
+    no_audio_ref=False
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -468,6 +474,7 @@ def infer_batch_process(
                 steps=nfe_step,
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
+                no_audio_ref=no_audio_ref
             )
 
             generated = generated.to(torch.float32)

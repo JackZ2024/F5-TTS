@@ -21,6 +21,7 @@ from f5_tts.infer.utils_infer import (
     sway_sampling_coef,
     speed,
     fix_duration,
+    no_audio_ref,
     infer_process,
     load_model,
     load_vocoder,
@@ -162,6 +163,11 @@ parser.add_argument(
     type=float,
     help=f"Fix the total duration (ref and gen audios) in seconds, default {fix_duration}",
 )
+parser.add_argument(
+    "--no_audio_ref",
+    type=bool,
+    help=f"Drop audio prompt",
+)
 args = parser.parse_args()
 
 
@@ -203,7 +209,7 @@ cfg_strength = args.cfg_strength or config.get("cfg_strength", cfg_strength)
 sway_sampling_coef = args.sway_sampling_coef or config.get("sway_sampling_coef", sway_sampling_coef)
 speed = args.speed or config.get("speed", speed)
 fix_duration = args.fix_duration or config.get("fix_duration", fix_duration)
-
+no_audio_ref = args.no_audio_ref or config.get("no_audio_ref", no_audio_ref)
 
 # patches for pip pkg user
 if "infer/examples/" in ref_audio:
@@ -330,6 +336,7 @@ def main():
             sway_sampling_coef=sway_sampling_coef,
             speed=speed,
             fix_duration=fix_duration,
+            no_audio_ref=no_audio_ref
         )
         generated_audio_segments.append(audio_segment)
 
