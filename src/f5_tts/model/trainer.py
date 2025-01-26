@@ -229,7 +229,7 @@ class Trainer:
         gc.collect()
         return update
 
-    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None):
+    def train(self, train_dataset: Dataset, test_dataset: Dataset, num_workers=16, resumable_with_seed: int = None):
         if self.log_samples:
             from f5_tts.infer.utils_infer import cfg_strength, load_vocoder, nfe_step, sway_sampling_coef
 
@@ -272,6 +272,14 @@ class Trainer:
                 persistent_workers=True,
                 batch_sampler=batch_sampler,
             )
+            test_dataloader = DataLoader(
+                test_dataset,
+                collate_fn=collate_fn,
+                num_workers=num_workers,
+                pin_memory=False,
+                persistent_workers=True,
+                batch_sampler=batch_sampler,
+            )
         else:
             raise ValueError(f"batch_size_type must be either 'sample' or 'frame', but received {self.batch_size_type}")
 
@@ -288,8 +296,8 @@ class Trainer:
         self.scheduler = SequentialLR(
             self.optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[warmup_updates]
         )
-        train_dataloader, self.scheduler = self.accelerator.prepare(
-            train_dataloader, self.scheduler
+        train_dataloader, test_dataloader, self.scheduler = self.accelerator.prepare(
+            train_dataloader, test_dataloader, self.scheduler
         )  # actual multi_gpu updates = single_gpu updates / gpu nums
         start_update = self.load_checkpoint()
         global_update = start_update
@@ -360,7 +368,7 @@ class Trainer:
 
                 if global_update % self.save_per_updates == 0 and self.accelerator.sync_gradients:
                     self.save_checkpoint(global_update)
-
+                    self.evaluate(test_dataloader, global_update)
                     if self.log_samples and self.accelerator.is_local_main_process:
                         def find_first_index_no_exceed_15s(lengths):
                             try:
@@ -398,7 +406,7 @@ class Trainer:
                             f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
                         )
                         with open(f"{log_samples_path}/info.txt", "a", encoding="utf-8") as file:
-                            file.write(f"{log_samples_path}/update_{global_update}_ref.wav ---> {text_inputs[index]}\n")
+                            file.write(f"update_{global_update}_ref.wav ---> {''.join(text_inputs[index])}\n")
 
                 if global_update % self.last_per_updates == 0 and self.accelerator.sync_gradients:
                     self.save_checkpoint(global_update, last=True)
@@ -406,3 +414,30 @@ class Trainer:
         self.save_checkpoint(global_update, last=True)
 
         self.accelerator.end_training()
+
+    def evaluate(self, test_dataloader, global_update):
+        self.model.eval()
+        total_loss = 0
+        num_batches = 0
+
+        with torch.no_grad():
+            for batch in test_dataloader:
+                text_inputs = batch["text"]
+                mel_spec = batch["mel"].permute(0, 2, 1)
+                mel_lengths = batch["mel_lengths"]
+
+                loss, cond, pred = self.model(
+                    mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
+                )
+
+                total_loss += loss.item()
+                num_batches += 1
+
+        avg_loss = total_loss / num_batches if num_batches > 0 else 0
+
+        if self.accelerator.is_local_main_process:
+            self.accelerator.log({"eval_loss": avg_loss}, step=global_update)
+            if self.logger == "tensorboard":
+                self.writer.add_scalar("eval_loss", avg_loss, global_update)
+
+        self.model.train()

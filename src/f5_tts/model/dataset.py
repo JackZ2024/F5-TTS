@@ -1,4 +1,5 @@
 import json
+import os.path
 import random
 from importlib.resources import files
 
@@ -251,6 +252,8 @@ def load_dataset(
                 train_dataset = load_from_disk(f"{rel_data_path}/raw")
             except:  # noqa: E722
                 train_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
+            if os.path.exists(f"{rel_data_path}/test_raw.arrow"):
+                test_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
             preprocessed_mel = False
         elif audio_type == "mel":
             train_dataset = Dataset_.from_file(f"{rel_data_path}/mel.arrow")
@@ -265,6 +268,18 @@ def load_dataset(
             mel_spec_module=mel_spec_module,
             **mel_spec_kwargs,
         )
+
+        if test_dataset is not None:
+            with open(f"{rel_data_path}/test_duration.json", "r", encoding="utf-8") as f:
+                data_dict = json.load(f)
+            durations = data_dict["duration"]
+            test_dataset = CustomDataset(
+                test_dataset,
+                durations=durations,
+                preprocessed_mel=preprocessed_mel,
+                mel_spec_module=mel_spec_module,
+                **mel_spec_kwargs,
+            )
 
     elif dataset_type == "CustomDatasetPath":
         try:
@@ -289,7 +304,7 @@ def load_dataset(
             load_dataset(f"{pre}/{pre}", split=f"train.{post}", cache_dir=str(files("f5_tts").joinpath("../../data"))),
         )
 
-    return train_dataset
+    return train_dataset, test_dataset
 
 
 # collation
