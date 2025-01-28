@@ -5,12 +5,14 @@ import re
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import soundfile as sf
 import tomli
 from cached_path import cached_path
 from omegaconf import OmegaConf
+import safetensors.torch
 
 from f5_tts.infer.utils_infer import (
     mel_spec_type,
@@ -29,7 +31,8 @@ from f5_tts.infer.utils_infer import (
     remove_silence_for_generated_wav,
 )
 from f5_tts.model import DiT, UNetT
-
+from f5_tts.model.duration import DurationPredictor, DurationTransformer
+from f5_tts.model.utils import get_tokenizer
 
 parser = argparse.ArgumentParser(
     prog="python3 infer-cli.py",
@@ -64,6 +67,12 @@ parser.add_argument(
     "--ckpt_file",
     type=str,
     help="The path to model checkpoint .pt, leave blank to use default",
+)
+parser.add_argument(
+    "-p_dur",
+    "--dur_ckpt_file",
+    type=str,
+    help="The path to duration model checkpoint .pt, leave blank to use default",
 )
 parser.add_argument(
     "-v",
@@ -282,6 +291,25 @@ elif model == "E2-TTS":
 print(f"Using {model}...")
 ema_model = load_model(model_cls, model_cfg, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file)
 
+if args.dur_ckpt_file:
+    vocab_char_map, vocab_size = get_tokenizer(vocab_file, "pinyin")
+    dur_model = DurationPredictor(
+        transformer=DurationTransformer(
+            dim=512,
+            depth=8,
+            heads=8,
+            text_dim=512,
+            ff_mult=2,
+            conv_layers=2,
+            text_num_embeds=len(vocab_char_map) - 1,
+        ),
+        vocab_char_map=vocab_char_map,
+    )
+
+    # Load weights
+    weights = safetensors.torch.load_file(args.dur_ckpt_file)
+    dur_model.load_state_dict(weights)
+
 
 # inference process
 
@@ -336,7 +364,8 @@ def main():
             sway_sampling_coef=sway_sampling_coef,
             speed=speed,
             fix_duration=fix_duration,
-            no_audio_ref=no_audio_ref
+            no_audio_ref=no_audio_ref,
+            dur_model=dur_model
         )
         generated_audio_segments.append(audio_segment)
 
