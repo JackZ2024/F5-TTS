@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import datetime
+import os
 from typing import Optional
 
-import click
 import torch
 import torch.nn as nn
+from accelerate import Accelerator
+from einops import rearrange
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import (
     LinearLR,
@@ -12,13 +15,7 @@ from torch.optim.lr_scheduler import (
     SequentialLR,
 )
 from torch.utils.tensorboard import SummaryWriter
-from einops import rearrange
-import os
 
-from f5_tts.model.dataset import load_dataset
-from f5_tts.model.duration import DurationPredictor, DurationTransformer
-from f5_tts.model.modules import MelSpec
-from f5_tts.model.utils import get_tokenizer
 
 # reference: https://github.com/lucasnewman/f5-tts-mlx/blob/4d24ebcc0c7c6215d64ed29eabdd32570084543f/f5_tts_mlx/duration_trainer.py
 
@@ -37,20 +34,15 @@ class DurationTrainer:
             num_warmup_steps: int = 1000,
             max_grad_norm: float = 1.0,
             log_dir: str = "runs/f5tts_duration",
-            device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
-        self.model = model.to(device)
-        self.device = device
+        self.accelerator = Accelerator()
+        self.model = model
         self.num_warmup_steps = num_warmup_steps
         self.max_grad_norm = max_grad_norm
         self.writer = SummaryWriter(log_dir)
-
-        # Assuming MelSpec is implemented elsewhere
-        self.mel_spectrogram = MelSpec()
-
-        # Create checkpoint directory
         self.checkpoint_dir = os.path.join(log_dir, "checkpoints")
         os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self.model = self.accelerator.prepare(self.model)
 
     def save_checkpoint(self, step: int, val_loss: Optional[float] = None):
         checkpoint = {
@@ -68,7 +60,7 @@ class DurationTrainer:
     def load_checkpoint(self, step: int):
         checkpoint = torch.load(
             os.path.join(self.checkpoint_dir, f"f5tts_duration_{step}.pt"),
-            map_location=self.device
+            map_location="cpu"
         )
         self.model.load_state_dict(checkpoint['model_state_dict'])
         if hasattr(self, 'optimizer'):
@@ -111,8 +103,8 @@ class DurationTrainer:
 
     def train(
             self,
-            train_dataset,
-            val_dataset,
+            train_dataloader,
+            val_dataloader,
             learning_rate: float = 1e-4,
             weight_decay: float = 1e-2,
             total_steps: int = 100_000,
@@ -149,6 +141,11 @@ class DurationTrainer:
             milestones=[self.num_warmup_steps]
         )
 
+        self.scheduler, self.optimizer, train_dataloader, val_dataloader = self.accelerator.prepare(self.scheduler,
+                                                                                                    self.optimizer,
+                                                                                                    train_dataloader,
+                                                                                                    val_dataloader)
+
         # Load checkpoint if specified
         start_step = 0
         best_val_loss = float('inf')
@@ -164,7 +161,7 @@ class DurationTrainer:
 
         self.model.train()
 
-        for batch in train_dataset:
+        for batch in train_dataloader:
             text_inputs = batch["text"]
 
             mel_spec = rearrange(
@@ -222,7 +219,7 @@ class DurationTrainer:
 
             # Validation
             if global_step % validate_every == 0:
-                val_loss = self.validate(val_dataset)
+                val_loss = self.validate(val_dataloader)
                 self.writer.add_scalar('Loss/val', val_loss, global_step)
                 print(f"Validation loss at step {global_step}: {val_loss:.4f}")
 
@@ -246,47 +243,3 @@ class DurationTrainer:
 
         self.writer.close()
         print(f"Training complete in {datetime.datetime.now() - training_start_date}")
-
-
-target_sample_rate = 24000
-n_mel_channels = 100
-hop_length = 256
-win_length = 1024
-n_fft = 1024
-mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
-
-
-@click.command
-@click.option("--dataset_name")
-def main(dataset_name):
-    mel_spec_kwargs = dict(
-        n_fft=n_fft,
-        hop_length=hop_length,
-        win_length=win_length,
-        n_mel_channels=n_mel_channels,
-        target_sample_rate=target_sample_rate,
-        mel_spec_type=mel_spec_type,
-    )
-    tokenizer = "pinyin"
-
-    vocab_char_map, vocab_size = get_tokenizer(dataset_name, tokenizer)
-
-    train_dataset, test_dataset = load_dataset(dataset_name, mel_spec_kwargs=mel_spec_kwargs)
-
-    trainer = DurationTrainer(DurationPredictor(
-        transformer=DurationTransformer(
-            dim=512,
-            depth=8,
-            heads=8,
-            text_dim=512,
-            ff_mult=2,
-            conv_layers=2,
-            text_num_embeds=len(vocab_char_map) - 1,
-        ),
-        vocab_char_map=vocab_char_map,
-    ))
-    trainer.train(train_dataset, test_dataset)
-
-
-if __name__ == '__main__':
-    main()
