@@ -7,6 +7,8 @@ from importlib.resources import files
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from einops import reduce
+import einx
 
 import jieba
 from pypinyin import lazy_pinyin, Style
@@ -70,11 +72,20 @@ def maybe_masked_mean(t: float["b n d"], mask: bool["b n"] = None) -> float["b d
     if not exists(mask):
         return t.mean(dim=1)
 
-    t = torch.where(mask[:, :, None], t, torch.tensor(0.0, device=t.device))
-    num = t.sum(dim=1)
-    den = mask.float().sum(dim=1, keepdim=True)
+    t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
+    num = reduce(t, 'b n d -> b d', 'sum')
+    den = reduce(mask.float(), 'b n -> b', 'sum')
 
-    return num / den.clamp(min=1.0)
+    return einx.divide('b d, b -> b d', num, den.clamp(min = 1.))
+
+    # t = torch.where(mask[:, :, None], t, torch.tensor(0.0, device=t.device))
+    # print(f"t: {t.shape}")
+    # num = t.sum(dim=1)
+    # print(f"num: {num.shape} {num}")
+    # den = mask.float().sum(dim=1)
+    # print(f"den: {den.shape} {den}")
+
+    # return num / den.clamp(min=1.0)
 
 
 # simple utf-8 tokenizer, since paper went character based

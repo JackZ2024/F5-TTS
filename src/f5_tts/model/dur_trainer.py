@@ -1,237 +1,223 @@
+# origin: https://github.com/lucasnewman/f5-tts-mlx/issues/17#issuecomment-2453045703
+
 from __future__ import annotations
 
-import datetime
 import os
-from typing import Optional
+import random
+
+from tqdm import tqdm
 
 import torch
-import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LinearLR, SequentialLR
+
 from accelerate import Accelerator
+from accelerate.utils import DistributedDataParallelKwargs
+
 from einops import rearrange
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import (
-    LinearLR,
-    CosineAnnealingLR,
-    SequentialLR,
-)
-from torch.utils.tensorboard import SummaryWriter
-
+from torch.utils.data import Dataset, Sampler
 from f5_tts.model.dur import DurationPredictor
+from f5_tts.model.modules import MelSpec
+from f5_tts.model.utils import exists
+from f5_tts.model.dataset import collate_fn
 
 
-# reference: https://github.com/lucasnewman/f5-tts-mlx/blob/4d24ebcc0c7c6215d64ed29eabdd32570084543f/f5_tts_mlx/duration_trainer.py
+class DynamicBatchSampler(Sampler):
+    def __init__(self, data_source, max_batch_tokens, collate_fn, shuffle=True):
+        self.data_source = data_source
+        self.max_batch_tokens = max_batch_tokens
+        self.collate_fn = collate_fn
+        self.shuffle = shuffle
 
-def exists(v):
-    return v is not None
+    def __iter__(self):
+        indices = list(range(len(self.data_source)))
 
+        # Shuffle indices if required
+        if self.shuffle:
+            random.shuffle(indices)
 
-def default(v, d):
-    return v if exists(v) else d
+        batch = []
+        cum_length = 0
+        for idx in indices:
+            item = self.data_source[idx]
+            item_length = item['mel_spec'].shape[-1]  # or use len(item['text']) for text length
+
+            if cum_length + item_length > self.max_batch_tokens and batch:
+                yield batch
+                batch = []
+                cum_length = 0
+
+            batch.append(idx)
+            cum_length += item_length
+
+        if batch:
+            yield batch
+
+    def __len__(self):
+        return len(self.data_source)
 
 
 class DurationTrainer:
     def __init__(
             self,
             model: DurationPredictor,
-            num_warmup_steps: int = 1000,
-            max_grad_norm: float = 1.0,
-            log_dir: str = "runs/f5tts_duration",
+            optimizer,
+            num_warmup_steps=20000,
+            grad_accumulation_steps=1,
+            max_grad_norm=1.0,
+            sample_rate=24_000,
+            accelerate_kwargs: dict = dict(),
     ):
-        self.accelerator = Accelerator()
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+
+        self.accelerator = Accelerator(
+            kwargs_handlers=[ddp_kwargs],
+            gradient_accumulation_steps=grad_accumulation_steps,
+            **accelerate_kwargs,
+        )
+
+        self.target_sample_rate = sample_rate
+
         self.model = model
+        self.optimizer = optimizer
         self.num_warmup_steps = num_warmup_steps
+        self.mel_spectrogram = MelSpec()
+
+        self.model, self.optimizer = self.accelerator.prepare(
+            self.model, self.optimizer
+        )
         self.max_grad_norm = max_grad_norm
-        self.writer = SummaryWriter(log_dir)
-        self.checkpoint_dir = os.path.join(log_dir, "checkpoints")
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
-        self.model = self.accelerator.prepare(self.model)
 
-    def save_checkpoint(self, step: int, val_loss: Optional[float] = None):
-        checkpoint = {
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'step': step,
-            'val_loss': val_loss
-        }
-        torch.save(
-            checkpoint,
-            os.path.join(self.checkpoint_dir, f"f5tts_duration_{step}.pt")
-        )
+    @property
+    def is_main(self):
+        return self.accelerator.is_main_process
 
-    def load_checkpoint(self, step: int):
-        checkpoint = torch.load(
-            os.path.join(self.checkpoint_dir, f"f5tts_duration_{step}.pt"),
-            map_location="cpu"
-        )
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        if hasattr(self, 'optimizer'):
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if hasattr(self, 'scheduler'):
-            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        return checkpoint.get('val_loss')
+    def checkpoint_path(self, step: int):
+        return f"f5tts_duration_{step}.pt"
 
-    @torch.no_grad()
-    def validate(self, val_dataset) -> float:
-        self.model.eval()
-        total_loss = 0
-        total_samples = 0
-
-        for batch in val_dataset:
-            text_inputs = batch["text"]
-            mel_spec = batch["mel"].permute(0, 2, 1)
-            mel_lens = batch["mel_lengths"]
-
-            loss = self.model(
-                mel_spec,
-                text=text_inputs,
-                lens=mel_lens,
-                return_loss=True
+    def save_checkpoint(self, step, finetune=False):
+        self.accelerator.wait_for_everyone()
+        if self.is_main:
+            checkpoint = dict(
+                model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
+                optimizer_state_dict=self.accelerator.unwrap_model(
+                    self.optimizer
+                ).state_dict(),
+                scheduler_state_dict=self.scheduler.state_dict(),
+                step=step,
             )
 
-            total_loss += loss.item()
-            total_samples += 1
+            self.accelerator.save(checkpoint, self.checkpoint_path(step))
 
-        self.model.train()
-        return total_loss / total_samples
+    def load_checkpoint(self, step=0):
+        if not exists(self.checkpoint_path(step)) or not os.path.exists(
+                self.checkpoint_path(step)
+        ):
+            return 0
+
+        checkpoint = torch.load(
+            self.checkpoint_path(step), map_location="cpu", weights_only=True
+        )
+        self.accelerator.unwrap_model(self.model).load_state_dict(
+            checkpoint["model_state_dict"]
+        )
+        # self.accelerator.unwrap_model(self.optimizer).load_state_dict(checkpoint['optimizer_state_dict'])
+
+        if self.scheduler:
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        return checkpoint["step"]
 
     def train(
-            self,
-            train_dataloader,
-            val_dataloader,
-            learning_rate: float = 1e-4,
-            weight_decay: float = 1e-2,
-            total_steps: int = 100_000,
-            log_every: int = 100,
-            save_every: int = 1000,
-            validate_every: int = 1000,
-            checkpoint: Optional[int] = None,
+            self, train_dataset, epochs, max_batch_tokens, num_workers=12, save_step=1000
     ):
-        # Setup optimizer
-        self.optimizer = AdamW(
-            self.model.parameters(),
-            lr=learning_rate,
-            weight_decay=weight_decay
+        dynamic_sampler = DynamicBatchSampler(
+            train_dataset, max_batch_tokens=max_batch_tokens, collate_fn=collate_fn
         )
-
-        # Setup learning rate scheduler
+        train_dataloader = DataLoader(
+            train_dataset,
+            collate_fn=collate_fn,
+            batch_sampler=dynamic_sampler,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+        total_steps = len(train_dataloader) * epochs
+        decay_steps = total_steps - self.num_warmup_steps
         warmup_scheduler = LinearLR(
             self.optimizer,
-            start_factor=1e-8 / learning_rate,
+            start_factor=1e-8,
             end_factor=1.0,
-            total_iters=self.num_warmup_steps
+            total_iters=self.num_warmup_steps,
         )
-
-        decay_steps = total_steps - self.num_warmup_steps
-        cosine_scheduler = CosineAnnealingLR(
-            self.optimizer,
-            T_max=decay_steps,
-            eta_min=1e-8
+        decay_scheduler = LinearLR(
+            self.optimizer, start_factor=1.0, end_factor=1e-8, total_iters=decay_steps
         )
-
         self.scheduler = SequentialLR(
             self.optimizer,
-            schedulers=[warmup_scheduler, cosine_scheduler],
-            milestones=[self.num_warmup_steps]
+            schedulers=[warmup_scheduler, decay_scheduler],
+            milestones=[self.num_warmup_steps],
         )
-
-        self.scheduler, self.optimizer, train_dataloader, val_dataloader = self.accelerator.prepare(self.scheduler,
-                                                                                                    self.optimizer,
-                                                                                                    train_dataloader,
-                                                                                                    val_dataloader)
-
-        # Load checkpoint if specified
-        start_step = 0
-        best_val_loss = float('inf')
-        if checkpoint is not None:
-            val_loss = self.load_checkpoint(checkpoint)
-            if val_loss is not None:
-                best_val_loss = val_loss
-            start_step = checkpoint
-
+        train_dataloader, self.scheduler = self.accelerator.prepare(
+            train_dataloader, self.scheduler
+        )
+        start_step = self.load_checkpoint()
         global_step = start_step
-        training_start_date = datetime.datetime.now()
-        log_start_date = datetime.datetime.now()
 
-        self.model.train()
+        hps = {
+            "epochs": epochs,
+            "num_warmup_steps": self.num_warmup_steps,
+            "max_grad_norm": self.max_grad_norm,
+            # "batch_size": batch_size,
+        }
+        self.accelerator.init_trackers("f5tts_duration", config=hps)
 
-        for batch in train_dataloader:
-            text_inputs = batch["text"]
-            mel_spec = batch["mel"].permute(0, 2, 1)
-            mel_lens = batch["mel_lengths"]
-
-            # Forward pass
-            self.optimizer.zero_grad()
-            loss = self.model(
-                mel_spec,
-                text=text_inputs,
-                lens=mel_lens,
-                return_loss=True
+        for epoch in range(epochs):
+            self.model.train()
+            progress_bar = tqdm(
+                train_dataloader,
+                desc=f"Epoch {epoch + 1}/{epochs}",
+                unit="step",
+                disable=not self.accelerator.is_local_main_process,
             )
+            epoch_loss = 0.0
 
-            # Backward pass
-            loss.backward()
+            for batch in progress_bar:
+                with self.accelerator.accumulate(self.model):
+                    text_inputs = batch["text"]
+                    mel_spec = rearrange(batch["mel"], "b d n -> b n d")
+                    mel_lengths = batch["mel_lengths"]
 
-            if self.max_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.max_grad_norm
+                    loss = self.model(
+                        mel_spec, text=text_inputs, lens=mel_lengths, return_loss=True
+                    )
+                    self.accelerator.backward(loss)
+
+                    if self.max_grad_norm > 0 and self.accelerator.sync_gradients:
+                        self.accelerator.clip_grad_norm_(
+                            self.model.parameters(), self.max_grad_norm
+                        )
+
+                    self.optimizer.step()
+                    self.scheduler.step()
+                    self.optimizer.zero_grad()
+
+                self.accelerator.log(
+                    {"loss": loss.item(), "lr": self.scheduler.get_last_lr()[0]},
+                    step=global_step,
                 )
 
-            self.optimizer.step()
-            self.scheduler.step()
+                global_step += 1
+                epoch_loss += loss.item()
+                progress_bar.set_postfix(loss=loss.item())
 
-            # Logging
-            self.writer.add_scalar('Loss/train', loss.item(), global_step)
-            self.writer.add_scalar(
-                'Learning_rate',
-                self.scheduler.get_last_lr()[0],
-                global_step
-            )
-            self.writer.add_scalar(
-                'Batch_length',
-                mel_lens.sum().item(),
-                global_step
-            )
+                if global_step % save_step == 0:
+                    self.save_checkpoint(global_step)
 
-            if global_step > 0 and global_step % log_every == 0:
-                elapsed_time = datetime.datetime.now() - log_start_date
-                log_start_date = datetime.datetime.now()
-                if self.accelerator.is_local_main_process:
-                    self.accelerator.log({
-                        "loss": loss.item(),
-                        "sec_per_step": elapsed_time.seconds / log_every
-                    }, step=global_step)
+            epoch_loss /= len(train_dataloader)
+            if self.accelerator.is_local_main_process:
+                self.accelerator.log(
+                    {"epoch average loss": epoch_loss}, step=global_step
+                )
 
-                    # Validation
-                    if global_step % validate_every == 0:
-                        val_loss = self.validate(val_dataloader)
-                        self.writer.add_scalar('Loss/val', val_loss, global_step)
-                        self.accelerator.log({
-                            "val loss": val_loss,
-                            "sec_per_step": elapsed_time.seconds / log_every
-                        }, step=global_step)
-
-                        # Save best model
-                        if val_loss < best_val_loss:
-                            best_val_loss = val_loss
-                            self.save_checkpoint(
-                                global_step,
-                                val_loss=val_loss
-                            )
-                            self.accelerator.log({
-                                "best val loss": val_loss,
-                                "sec_per_step": elapsed_time.seconds / log_every
-                            }, step=global_step)
-
-                    # Regular checkpoint saving
-                    if global_step % save_every == 0 and global_step > 0:
-                        self.save_checkpoint(global_step)
-
-                    global_step += 1
-
-                    if global_step >= total_steps:
-                        break
-
-        self.writer.close()
         self.accelerator.end_training()
+
+        # self.writer.close()
