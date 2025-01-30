@@ -16,6 +16,8 @@ from torch.optim.lr_scheduler import (
 )
 from torch.utils.tensorboard import SummaryWriter
 
+from f5_tts.model.dur import DurationPredictor
+
 
 # reference: https://github.com/lucasnewman/f5-tts-mlx/blob/4d24ebcc0c7c6215d64ed29eabdd32570084543f/f5_tts_mlx/duration_trainer.py
 
@@ -30,7 +32,7 @@ def default(v, d):
 class DurationTrainer:
     def __init__(
             self,
-            model: nn.Module,
+            model: DurationPredictor,
             num_warmup_steps: int = 1000,
             max_grad_norm: float = 1.0,
             log_dir: str = "runs/f5tts_duration",
@@ -77,16 +79,8 @@ class DurationTrainer:
 
         for batch in val_dataset:
             text_inputs = batch["text"]
-
-            mel_spec = rearrange(
-                torch.tensor(batch["mel"], device=self.device),
-                "b 1 n c -> b n c"
-            )
-            mel_lens = torch.tensor(
-                batch["mel_lengths"],
-                dtype=torch.int32,
-                device=self.device
-            )
+            mel_spec = batch["mel"].permute(0, 2, 1)
+            mel_lens = batch["mel_lengths"]
 
             loss = self.model(
                 mel_spec,
@@ -163,16 +157,8 @@ class DurationTrainer:
 
         for batch in train_dataloader:
             text_inputs = batch["text"]
-
-            mel_spec = rearrange(
-                torch.tensor(batch["mel"], device=self.device),
-                "b 1 n c -> b n c"
-            )
-            mel_lens = torch.tensor(
-                batch["mel_lengths"],
-                dtype=torch.int32,
-                device=self.device
-            )
+            mel_spec = batch["mel"].permute(0, 2, 1)
+            mel_lens = batch["mel_lengths"]
 
             # Forward pass
             self.optimizer.zero_grad()
@@ -211,35 +197,41 @@ class DurationTrainer:
             if global_step > 0 and global_step % log_every == 0:
                 elapsed_time = datetime.datetime.now() - log_start_date
                 log_start_date = datetime.datetime.now()
+                if self.accelerator.is_local_main_process:
+                    self.accelerator.log({
+                        "loss": loss.item(),
+                        "sec_per_step": elapsed_time.seconds / log_every
+                    }, step=global_step)
 
-                print(
-                    f"step {global_step}: loss = {loss.item():.4f}, "
-                    f"sec per step = {(elapsed_time.seconds / log_every):.2f}"
-                )
+                    # Validation
+                    if global_step % validate_every == 0:
+                        val_loss = self.validate(val_dataloader)
+                        self.writer.add_scalar('Loss/val', val_loss, global_step)
+                        self.accelerator.log({
+                            "val loss": val_loss,
+                            "sec_per_step": elapsed_time.seconds / log_every
+                        }, step=global_step)
 
-            # Validation
-            if global_step % validate_every == 0:
-                val_loss = self.validate(val_dataloader)
-                self.writer.add_scalar('Loss/val', val_loss, global_step)
-                print(f"Validation loss at step {global_step}: {val_loss:.4f}")
+                        # Save best model
+                        if val_loss < best_val_loss:
+                            best_val_loss = val_loss
+                            self.save_checkpoint(
+                                global_step,
+                                val_loss=val_loss
+                            )
+                            self.accelerator.log({
+                                "best val loss": val_loss,
+                                "sec_per_step": elapsed_time.seconds / log_every
+                            }, step=global_step)
 
-                # Save best model
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    self.save_checkpoint(
-                        global_step,
-                        val_loss=val_loss
-                    )
-                    print(f"New best validation loss: {val_loss:.4f}")
+                    # Regular checkpoint saving
+                    if global_step % save_every == 0 and global_step > 0:
+                        self.save_checkpoint(global_step)
 
-            # Regular checkpoint saving
-            if global_step % save_every == 0:
-                self.save_checkpoint(global_step)
+                    global_step += 1
 
-            global_step += 1
-
-            if global_step >= total_steps:
-                break
+                    if global_step >= total_steps:
+                        break
 
         self.writer.close()
-        print(f"Training complete in {datetime.datetime.now() - training_start_date}")
+        self.accelerator.end_training()

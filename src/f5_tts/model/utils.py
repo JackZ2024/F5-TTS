@@ -72,7 +72,7 @@ def maybe_masked_mean(t: float["b n d"], mask: bool["b n"] = None) -> float["b d
 
     t = torch.where(mask[:, :, None], t, torch.tensor(0.0, device=t.device))
     num = t.sum(dim=1)
-    den = mask.float().sum(dim=1)
+    den = mask.float().sum(dim=1, keepdim=True)
 
     return num / den.clamp(min=1.0)
 

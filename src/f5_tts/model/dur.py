@@ -1,3 +1,4 @@
+from __future__ import annotations
 import einx
 import torch
 import torch.nn.functional as F
@@ -6,7 +7,7 @@ from torch import nn, Tensor
 from x_transformers.x_transformers import RotaryEmbedding
 
 from f5_tts.model.backbones.dit import TextEmbedding
-from f5_tts.model.modules import MelSpec, Attention, ConvPositionEmbedding, FeedForward
+from f5_tts.model.modules import MelSpec, ConvPositionEmbedding, FeedForward, Attention, AttnProcessor
 from f5_tts.model.utils import (
     exists,
     default,
@@ -54,6 +55,7 @@ class DurationBlock(nn.Module):
 
         self.attn_norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.attn = Attention(
+            processor=AttnProcessor(),
             dim=dim,
             heads=heads,
             dim_head=dim_head,
@@ -67,7 +69,6 @@ class DurationBlock(nn.Module):
 
     def forward(self, x, mask=None, rope=None):
         norm = self.attn_norm(x)
-
         # attention
         attn_output = self.attn(x=norm, mask=mask, rope=rope)
 
@@ -110,7 +111,7 @@ class DurationTransformer(nn.Module):
         self.dim = dim
         self.depth = depth
 
-        self.transformer_blocks = [
+        self.transformer_blocks = nn.ModuleList([
             DurationBlock(
                 dim=dim,
                 heads=heads,
@@ -119,7 +120,7 @@ class DurationTransformer(nn.Module):
                 dropout=dropout,
             )
             for _ in range(depth)
-        ]
+        ])
 
         self.norm_out = nn.RMSNorm(dim)
 
@@ -136,7 +137,6 @@ class DurationTransformer(nn.Module):
         x = self.input_embed(x, text_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
-
         for block in self.transformer_blocks:
             x = block(x, mask=mask, rope=rope)
 
@@ -157,7 +157,7 @@ class DurationPredictor(nn.Module):
 
         # mel spec
         self._mel_spec = MelSpec(**mel_spec_kwargs)
-        num_channels = default(num_channels, self._mel_spec.n_mels)
+        num_channels = default(num_channels, self._mel_spec.n_mel_channels)
         self.num_channels = num_channels
 
         self.transformer = transformer
@@ -234,6 +234,7 @@ class DurationPredictor(nn.Module):
             inp,
             torch.zeros_like(inp)
         )
+
         x = self.transformer(inp, text=text)
 
         x = maybe_masked_mean(x, mask)

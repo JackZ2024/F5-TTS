@@ -37,7 +37,7 @@ def main(dataset_name):
         num_workers=16,
         pin_memory=True,
         persistent_workers=True,
-        batch_size=16,
+        batch_size=8,
         shuffle=True,
     )
 
