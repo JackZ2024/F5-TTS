@@ -1,7 +1,5 @@
 import os.path
-
 import click
-
 
 @click.command
 @click.option("--folder")
@@ -25,6 +23,6 @@ def check(folder):
             print("invalid wav: " + wav)
             os.remove(os.path.join(folder, "wavs", wav))
 
-
+# 移除metadata和wavs中的冗余数据
 if __name__ == '__main__':
     check()

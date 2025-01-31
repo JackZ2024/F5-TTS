@@ -59,7 +59,7 @@ cfg_strength = 2.0
 sway_sampling_coef = -1.0
 speed = 1.0
 fix_duration = None
-no_audio_ref = False
+no_ref_audio = False
 # -----------------------------------------
 
 
@@ -379,12 +379,12 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
-    no_audio_ref=no_audio_ref,
+    no_ref_audio=no_ref_audio,
     dur_model=None
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
-    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (25 - audio.shape[-1] / sr))
+    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (17 - audio.shape[-1] / sr))
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
@@ -410,7 +410,7 @@ def infer_process(
         speed=speed,
         fix_duration=fix_duration,
         device=device,
-        no_audio_ref=no_audio_ref,
+        no_ref_audio=no_ref_audio,
         dur_model=dur_model
     )
 
@@ -434,7 +434,7 @@ def infer_batch_process(
     speed=1,
     fix_duration=None,
     device=None,
-    no_audio_ref=False,
+    no_ref_audio=False,
     dur_model = None
 ):
     audio, sr = ref_audio
@@ -459,10 +459,17 @@ def infer_batch_process(
         text_list = [ref_text + gen_text]
         final_text_list = convert_char_to_pinyin(text_list)
 
+        ref_audio_len = audio.shape[-1] // hop_length
         if dur_model is not None:
-            duration = dur_model(audio, final_text_list)
+            duration_in_sec = dur_model(audio, final_text_list)
+            frame_rate = model_obj.mel_spec.target_sample_rate // model_obj.mel_spec.hop_length
+            duration = (duration_in_sec * frame_rate / speed).to(torch.long).item()
+            print("dur model sec:", duration_in_sec.item())
+            ref_text_len = len(ref_text.encode("utf-8"))
+            gen_text_len = len(gen_text.encode("utf-8"))
+            duration2 = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
+            print("estimate sec:", duration2 * hop_length / target_sample_rate)
         else:
-            ref_audio_len = audio.shape[-1] // hop_length
             if fix_duration is not None:
                 duration = int(fix_duration * target_sample_rate / hop_length)
             else:
@@ -480,7 +487,7 @@ def infer_batch_process(
                 steps=nfe_step,
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
-                no_audio_ref=no_audio_ref
+                no_ref_audio=no_ref_audio
             )
 
             generated = generated.to(torch.float32)
