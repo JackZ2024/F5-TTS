@@ -55,12 +55,12 @@ def main(dataset_folder):
         accelerate_kwargs={"mixed_precision": "fp16", "log_with": "wandb"}
     )
 
-    epochs = 25
+    epochs = 300
     max_batch_tokens = 16_000
 
     print("Training...")
 
-    trainer.train(train_dataset, epochs, max_batch_tokens, num_workers=0, save_step=1000)
+    trainer.train(train_dataset, epochs, max_batch_tokens, num_workers=0, save_step=5000)
 
 
 if __name__ == '__main__':

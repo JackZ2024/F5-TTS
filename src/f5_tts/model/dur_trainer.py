@@ -128,7 +128,7 @@ class DurationTrainer:
         return checkpoint["step"]
 
     def train(
-            self, train_dataset, epochs, max_batch_tokens, num_workers=12, save_step=1000
+            self, train_dataset, epochs, max_batch_tokens, num_workers=12, save_step=5000
     ):
         dynamic_sampler = DynamicBatchSampler(
             train_dataset, max_batch_tokens=max_batch_tokens, collate_fn=collate_fn
@@ -174,6 +174,7 @@ class DurationTrainer:
             self.model.train()
             progress_bar = tqdm(
                 train_dataloader,
+                total=len(train_dataloader),
                 desc=f"Epoch {epoch + 1}/{epochs}",
                 unit="step",
                 disable=not self.accelerator.is_local_main_process,
@@ -219,5 +220,3 @@ class DurationTrainer:
                 )
 
         self.accelerator.end_training()
-
-        # self.writer.close()
