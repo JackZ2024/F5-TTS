@@ -32,7 +32,6 @@ from f5_tts.model.utils import convert_char_to_pinyin
 from f5_tts.infer.utils_infer import transcribe
 from importlib.resources import files
 
-
 training_process = None
 system = platform.system()
 python_executable = sys.executable or "python"
@@ -781,18 +780,20 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
             print(f"Error processing {file_audio}: {e}")
             continue
 
-        if duration < 1 or duration > 25:
-            if duration > 25:
-                error_files.append([file_audio, "duration > 25 sec"])
+        if duration < 1 or duration > 20:
+            if duration > 20:
+                error_files.append([file_audio, "duration > 20 sec"])
             if duration < 1:
                 error_files.append([file_audio, "duration < 1 sec "])
             continue
         if len(text) < 3:
             error_files.append([file_audio, "very small text len 3"])
             continue
-
+        
+        lang = name_project.split("_")[0]
+        lang = re.sub(r'\d+$', '', lang)
         text = clear_text(text)
-        text = convert_char_to_pinyin([text], polyphone=True)[0]
+        text = convert_char_to_pinyin([text], polyphone=True, lang=lang)[0]
 
         audio_path_list.append(file_audio)
         duration_list.append(duration)
@@ -1120,8 +1121,11 @@ def vocab_check(project_name):
             continue
 
         text = sp[1].lower().strip()
-
-        for t in text:
+        # 在这里进行转换，然后通过空格拆分
+        lang = project_name.split("_")[0]
+        lang = re.sub(r'\d+$', '', lang)
+        texts = convert_char_to_pinyin([text], polyphone=True, lang=lang)[0]
+        for t in texts:
             if t not in vocab and t not in miss_symbols_keep:
                 miss_symbols.append(t)
                 miss_symbols_keep[t] = t
@@ -1191,6 +1195,8 @@ def infer(
     project, file_checkpoint, exp_name, ref_text, ref_audio, gen_text, nfe_step, use_ema, speed, seed, remove_silence
 ):
     global last_checkpoint, last_device, tts_api, last_ema
+    lang = project.split("_")[0]
+    lang = re.sub(r'\d+$', '', lang)
 
     if not os.path.isfile(file_checkpoint):
         return None, "checkpoint not found!"
@@ -1228,6 +1234,7 @@ def infer(
             speed=speed,
             seed=seed,
             remove_silence=remove_silence,
+            lang=lang,
         )
         return f.name, tts_api.device, str(tts_api.seed)
 

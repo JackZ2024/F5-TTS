@@ -11,7 +11,6 @@ from torch.nn.utils.rnn import pad_sequence
 import jieba
 from pypinyin import lazy_pinyin, Style
 
-
 # seed everything
 
 
@@ -37,7 +36,6 @@ def default(v, d):
 
 
 # tensor helpers
-
 
 def lens_to_mask(t: int["b"], length: int | None = None) -> bool["b n"]:  # noqa: F722 F821
     if not exists(length):
@@ -137,10 +135,11 @@ jieba.initialize()
 print("Word segmentation module jieba initialized.\n")
 
 
-def convert_char_to_pinyin(text_list, polyphone=True):
+def convert_char_to_pinyin(text_list, polyphone=True, lang=""):
+
     final_text_list = []
     custom_trans = str.maketrans(
-        {";": ",", "“": '"', "”": '"', "‘": "'", "’": "'"}
+        {";": ",", "“": '', "”": '', "‘": "'", "’": "'", "„":""}
     )  # add custom trans here, to address oov
 
     def is_chinese(c):
@@ -151,27 +150,42 @@ def convert_char_to_pinyin(text_list, polyphone=True):
     for text in text_list:
         char_list = []
         text = text.translate(custom_trans)
-        for seg in jieba.cut(text):
-            seg_byte_len = len(bytes(seg, "UTF-8"))
-            if seg_byte_len == len(seg):  # if pure alphabets and symbols
-                if char_list and seg_byte_len > 1 and char_list[-1] not in " :'\"":
-                    char_list.append(" ")
-                char_list.extend(seg)
-            elif polyphone and seg_byte_len == 3 * len(seg):  # if pure east asian characters
-                seg_ = lazy_pinyin(seg, style=Style.TONE3, tone_sandhi=True)
-                for i, c in enumerate(seg):
-                    if is_chinese(c):
-                        char_list.append(" ")
-                    char_list.append(seg_[i])
-            else:  # if mixed characters, alphabets and symbols
-                for c in seg:
-                    if ord(c) < 256:
-                        char_list.extend(c)
-                    elif is_chinese(c):
-                        char_list.append(" ")
-                        char_list.extend(lazy_pinyin(c, style=Style.TONE3, tone_sandhi=True))
-                    else:
+        if lang.lower() == "thai_v1":
+            texts = text
+            for seg in texts:
+                seg_byte_len = len(bytes(seg, "UTF-8"))
+                if seg_byte_len == len(seg):  # if pure alphabets and symbols
+                    for c in seg:
+                        if c not in "。，、；：？！《》【】—…":
+                            char_list.append(" ")
                         char_list.append(c)
+                elif seg_byte_len == 3 * len(seg):  # if pure thai characters
+                    if char_list and seg_byte_len > 1 and char_list[-1] not in " :'\"":
+                        char_list.append(" ")
+                    char_list.append(seg)
+        else:
+            for seg in jieba.cut(text):
+                seg_byte_len = len(bytes(seg, "UTF-8"))
+                if seg_byte_len == len(seg):  # if pure alphabets and symbols
+                    if char_list and seg_byte_len > 1 and char_list[-1] not in " :'\"":
+                        char_list.append(" ")
+                    char_list.extend(seg)
+                elif polyphone and seg_byte_len == 3 * len(seg):  # if pure east asian characters
+                    seg_ = lazy_pinyin(seg, style=Style.TONE3, tone_sandhi=True)
+                    for i, c in enumerate(seg):
+                        if is_chinese(c):
+                            char_list.append(" ")
+                        char_list.append(seg_[i])
+                else:  # if mixed characters, alphabets and symbols
+                    for c in seg:
+                        if ord(c) < 256:
+                            char_list.extend(c)
+                        elif is_chinese(c):
+                            char_list.append(" ")
+                            char_list.extend(lazy_pinyin(c, style=Style.TONE3, tone_sandhi=True))
+                        else:
+                            char_list.append(c)
+
         final_text_list.append(char_list)
 
     return final_text_list

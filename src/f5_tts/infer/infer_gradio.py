@@ -6,6 +6,7 @@ import re
 import tempfile
 from collections import OrderedDict
 from importlib.resources import files
+import os
 
 import click
 import gradio as gr
@@ -14,6 +15,9 @@ import soundfile as sf
 import torchaudio
 from cached_path import cached_path
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from pydub import AudioSegment
+import gdown
+import csv
 
 try:
     import spaces
@@ -44,10 +48,14 @@ from f5_tts.infer.utils_infer import (
 DEFAULT_TTS_MODEL = "F5-TTS"
 tts_model_choice = DEFAULT_TTS_MODEL
 
+# 在这里添加语言的中英对照，英文不区分大小写
+languages = {"泰语":"thai", "默认":""}
+
 DEFAULT_TTS_MODEL_CFG = [
     "hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors",
     "hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt",
     json.dumps(dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)),
+    "默认",
 ]
 
 
@@ -56,33 +64,179 @@ DEFAULT_TTS_MODEL_CFG = [
 vocoder = load_vocoder()
 
 
-def load_f5tts(ckpt_path=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))):
+def load_f5tts():
+    ckpt_path=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))
     F5TTS_model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
     return load_model(DiT, F5TTS_model_cfg, ckpt_path)
 
 
-def load_e2tts(ckpt_path=str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))):
+def load_e2tts():
+    ckpt_path=str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))
     E2TTS_model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4)
     return load_model(UNetT, E2TTS_model_cfg, ckpt_path)
 
+def get_url(ckpt_path):
+    global models_dict
+    model_url = ""
+    vocab_url = ""
+    for models_list in models_dict.values():
+        for model_dict in models_list:
+            if ckpt_path == model_dict["model"]:
+                model_url = model_dict["model_url"]
+                vocab_url = model_dict["vocab_url"]
+                return model_url, vocab_url
+
+    return model_url, vocab_url
+
+def get_drive_id(url):
+    """ 通过网盘文件url获取id """
+    pattern = r"(?:https?://)?(?:www\.)?drive\.google\.com/(?:file/d/|folder/d/|open\?id=|uc\?id=|drive/folders/)([a-zA-Z0-9_-]+)"
+    match = re.search(pattern, url)
+    if match:
+        return match.group(1)
+    else:
+        return url
 
 def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
     ckpt_path, vocab_path = ckpt_path.strip(), vocab_path.strip()
     if ckpt_path.startswith("hf://"):
         ckpt_path = str(cached_path(ckpt_path))
+    else:
+        if not os.path.exists(ckpt_path):
+            # 如果模型不存在，就根据链接下载
+            model_url, vocab_url = get_url(ckpt_path)
+            if model_url != "":
+                file_id = get_drive_id(model_url)
+                os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
+                gdown.download(id=file_id, output=ckpt_path, fuzzy=True)
+
     if vocab_path.startswith("hf://"):
         vocab_path = str(cached_path(vocab_path))
+    else:
+        if not os.path.exists(vocab_path):
+            # 如果vocab不存在，就根据链接下载
+            model_url, vocab_url = get_url(ckpt_path)
+            if vocab_url != "":
+                file_id = get_drive_id(vocab_url)
+                os.makedirs(os.path.dirname(vocab_path), exist_ok=True)
+                gdown.download(id=file_id, output=vocab_path, fuzzy=True)
+
     if model_cfg is None:
         model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
     return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path)
 
+def load_models_from_csv():
+    csv_path = "./models.csv"
+    models_dict = {}
+    if not os.path.exists(csv_path):
+        return models_dict
+    with open(csv_path, newline='', encoding='utf-8') as csvfile:
+        reader = csv.DictReader(csvfile)
+        # 名称	版本	语言	model链接	vocab链接
+        for row in reader:
+            model_name = row['名称'].strip()
+            model_version = row['版本'].strip()
+            model_lang = row['语言'].strip()
+            model_url = row['model链接'].strip()
+            vocab_rul = row['vocab链接'].strip()
+            if model_name == "" or model_lang == "" or model_url == "" or vocab_rul == "":
+                continue
 
-F5TTS_ema_model = load_f5tts()
-E2TTS_ema_model = load_e2tts() if USING_SPACES else None
+            if model_version != "":
+                model_version = "/" + model_version
+            model_path = "./models/" + model_lang + model_version + "/" + model_name
+            vocab_path = "./models/" + model_lang + model_version + "/vocab.txt"
+
+            model_dict = {}
+            model_dict["model"] = model_path.replace("\\", "/")
+            model_dict["vocab"] = vocab_path.replace("\\", "/")
+            model_dict["model_url"] = model_url
+            model_dict["vocab_url"] = vocab_rul
+            if model_lang in models_dict:
+                models_dict[model_lang].append(model_dict)
+            else:
+                models_dict[model_lang] = [model_dict]
+
+    return models_dict
+
+
+def load_models_list():
+    models_root_path = "./models"
+    models_dict = {}
+    model_dict = {}
+    model_dict["model"] = "hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"
+    model_dict["vocab"] = "hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt"
+    model_dict["model_url"] = ""
+    model_dict["vocab_url"] = ""
+    models_dict["默认"] = [model_dict]
+
+    # 优先使用csv文件加载模型，放置第一次用了csv，第二次用的时候models已经存在了，就无法加载csv里的模型了
+    csv_path = "./models.csv"
+    if os.path.exists(csv_path):
+        # 如果models文件夹不存在，说明不是在本地运行，那就到云端下载一份模型的列表，然后生成字典返回，等模型使用的时候再下载TODO
+        models = load_models_from_csv()
+        models_dict.update(models)
+        return models_dict
+    
+    if not os.path.exists(models_root_path):
+        return models_dict
+    for folder in os.listdir(models_root_path):
+        folder_path = models_root_path + "/" + folder
+        if os.path.isdir(folder_path):
+            language = folder
+            for dirpath, dirnames, filenames in os.walk(folder_path):
+                for file in filenames:
+                    if file.lower().endswith(".safetensors") or file.lower().endswith(".pt"):
+                        model_path = dirpath + "/" + file
+                        vocab_file = dirpath + "/vocab.txt"
+                        if os.path.exists(vocab_file):
+                            model_dict = {}
+                            model_dict["model"] = model_path.replace("\\", "/")
+                            model_dict["vocab"] = vocab_file.replace("\\", "/")
+                            model_dict["model_url"] = ""
+                            model_dict["vocab_url"] = ""
+                            if language in models_dict:
+                                models_dict[language].append(model_dict)
+                            else:
+                                models_dict[language] = [model_dict]
+
+    return models_dict
+
+def load_refs_list():
+    refs_root_path = "./refs"
+    refs_dict = {}
+    if not os.path.exists(refs_root_path):
+        # 如果refs文件夹不存在，那就到网盘下载一份，这里需要实现网盘下载refs文件夹的功能。TODO
+        return refs_dict
+
+    for folder in os.listdir(refs_root_path):
+        folder_path = refs_root_path + "/" + folder
+        if os.path.isdir(folder_path):
+            language = folder
+
+            ref_audio_dict = {}
+            for dirpath, dirnames, filenames in os.walk(folder_path):
+                for file in filenames:
+                    if file.lower().endswith(".wav") or file.lower().endswith(".mp3"):
+                        ref_audio_path = dirpath + "/" + file
+                        ref_txt_path = ref_audio_path[:-4] + ".txt"
+                        if os.path.exists(ref_txt_path):
+                            ref_audio_dict[ref_audio_path.replace("\\", "/")] = ref_txt_path.replace("\\", "/")
+
+            refs_dict[language] = ref_audio_dict
+
+    return refs_dict
+
+
+F5TTS_ema_model = None
+E2TTS_ema_model = None
 custom_ema_model, pre_custom_path = None, ""
 
 chat_model_state = None
 chat_tokenizer_state = None
+
+models_dict = load_models_list()
+refs_dict = load_refs_list()
 
 
 @gpu_decorator
@@ -112,7 +266,7 @@ def generate_response(messages, model, tokenizer):
 def infer(
     ref_audio_orig,
     ref_text,
-    gen_text,
+    gen_texts,
     model,
     remove_silence,
     cross_fade_duration=0.15,
@@ -123,14 +277,18 @@ def infer(
     if not ref_audio_orig:
         gr.Warning("Please provide reference audio.")
         return gr.update(), gr.update(), ref_text
-
-    if not gen_text.strip():
-        gr.Warning("Please enter text to generate.")
-        return gr.update(), gr.update(), ref_text
-
+    
     ref_audio, ref_text = preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=show_info)
 
+    lang = ""
+    if "-" in tts_model_choice[4]:
+        index = tts_model_choice[4].find("-")
+        lang = tts_model_choice[4][index + 1:]
+
     if model == "F5-TTS":
+        if F5TTS_ema_model is None:
+            show_info("Loading F5-TTS model...")
+            F5TTS_ema_model = load_f5tts()
         ema_model = F5TTS_ema_model
     elif model == "E2-TTS":
         global E2TTS_ema_model
@@ -147,25 +305,71 @@ def infer(
             pre_custom_path = model[1]
         ema_model = custom_ema_model
 
-    final_wave, final_sample_rate, combined_spectrogram = infer_process(
-        ref_audio,
-        ref_text,
-        gen_text,
-        ema_model,
-        vocoder,
-        cross_fade_duration=cross_fade_duration,
-        nfe_step=nfe_step,
-        speed=speed,
-        show_info=show_info,
-        progress=gr.Progress(),
-    )
+    gen_wav_files = []
+    gen_audio_path = "gen_audio"
+    if not os.path.exists(gen_audio_path):
+        os.mkdir(gen_audio_path)
+    else:
+        # 把里面的东西删除
+        for file in os.listdir(gen_audio_path):
+            try:
+                os.remove(gen_audio_path + "/" + file)
+            except:
+                pass
+    count = 0
+    for i in range(len(gen_texts)):
+        gen_text = gen_texts[i]
+        if gen_text.strip() == "":
+            continue
+        # gen_text_list = gen_text_length.split("\n")
+        show_info(f"开始生成第 { i+ 1} 个文本框的音频")
+        # progress=gr.Progress()
+        # for j, gen_text in enumerate(progress.tqdm(gen_text_list, desc="Processing")):
+
+        #     if gen_text.strip() == "":
+        #         continue
+        gen_text = gen_text.replace(" ", ",")
+        final_wave, final_sample_rate, combined_spectrogram = infer_process(
+            ref_audio,
+            ref_text,
+            gen_text,
+            ema_model,
+            vocoder,
+            cross_fade_duration=cross_fade_duration,
+            nfe_step=nfe_step,
+            speed=speed,
+            show_info=show_info,
+            progress=gr.Progress(),
+            lang=lang,
+        )
+
+        audio_filepath = gen_audio_path + f"/gen_audio_{count}.wav"
+        sf.write(audio_filepath, final_wave, final_sample_rate, 'PCM_24')
+        # 把文件路径放到列表里面，就不用自己再遍历了
+        gen_wav_files.append(audio_filepath)
+        count += 1
+
+    gen_audio = None
+    if len(gen_wav_files) > 0:
+        gen_audio = AudioSegment.from_file(gen_wav_files[0]) 
+
+    for i in range(1, len(gen_wav_files)):
+        gen_audio += AudioSegment.from_file(gen_wav_files[i]) 
+
+    # 导出合并后的24Khz音频
+    last_gen_audio_path = "last_audio/gen_audio.wav"
+    if gen_audio:
+        if not os.path.exists("last_audio"):
+            os.mkdir("last_audio")
+        gen_audio.export(last_gen_audio_path, format="wav", parameters=["-c:a", "pcm_s24le"])
 
     # Remove silence
-    if remove_silence:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-            sf.write(f.name, final_wave, final_sample_rate)
-            remove_silence_for_generated_wav(f.name)
-            final_wave, _ = torchaudio.load(f.name)
+    if remove_silence and gen_audio:
+        remove_silence_for_generated_wav(last_gen_audio_path)
+        final_wave, _ = torchaudio.load(last_gen_audio_path)
+        final_wave = final_wave.squeeze().cpu().numpy()
+    elif gen_audio:
+        final_wave, _ = torchaudio.load(last_gen_audio_path)
         final_wave = final_wave.squeeze().cpu().numpy()
 
     # Save the spectrogram
@@ -173,8 +377,27 @@ def infer(
         spectrogram_path = tmp_spectrogram.name
         save_spectrogram(combined_spectrogram, spectrogram_path)
 
-    return (final_sample_rate, final_wave), spectrogram_path, ref_text
+    return (final_sample_rate, final_wave), spectrogram_path, ref_text, last_gen_audio_path
 
+
+def create_textboxes(num):
+    try:
+        num = int(num)
+        if num <= 0:
+            return [gr.update(visible=False) for _ in range(20)]
+        
+        # 控制输入框的可见性，最多支持 20 个
+        updates = [gr.update(visible=True) if i < num else gr.update(visible=False) for i in range(20)]
+        return updates
+    except ValueError:
+        return [gr.update(visible=False) for _ in range(20)]
+    
+def load_ref_txt(ref_txt_path):
+    txt = ""
+    if os.path.exists(ref_txt_path):
+        with open(ref_txt_path, "r", encoding="utf8") as f:
+            txt = f.read()
+    return txt
 
 with gr.Blocks() as app_credits:
     gr.Markdown("""
@@ -187,21 +410,43 @@ with gr.Blocks() as app_credits:
 with gr.Blocks() as app_tts:
     gr.Markdown("# Batched TTS")
     ref_audio_input = gr.Audio(label="Reference Audio", type="filepath")
-    gen_text_input = gr.Textbox(label="Text to Generate", lines=10)
-    generate_btn = gr.Button("Synthesize", variant="primary")
-    with gr.Accordion("Advanced Settings", open=False):
-        ref_text_input = gr.Textbox(
-            label="Reference Text",
-            info="Leave blank to automatically transcribe the reference audio. If you enter text it will override automatic transcription.",
+    with gr.Row():
+        num_input = gr.Textbox(label="请输入需要的输入框数量(1-20)", value="5")
+        generate_textbox_btn = gr.Button("生成输入框")
+
+    # 动态布局区域
+    rows = []
+    max_per_row = 5
+    textboxes = []
+
+    # 创建一个动态布局，最多 20 个输入框
+    for i in range(4):  # 每行最多 5 个，4 行总共 20 个
+        with gr.Row() as row:
+            for j in range(max_per_row):
+                index = i * max_per_row + j
+                if index == 0:
+                    textbox = gr.Textbox(label=f"生成文本:{index+1}", lines=10, visible=True)
+                else:
+                    textbox = gr.Textbox(label=f"生成文本:{index+1}", lines=10, visible=False)
+                textboxes.append(textbox)
+            rows.append(row)
+    generate_textbox_btn.click(create_textboxes, inputs=[num_input], outputs=textboxes)
+
+    generate_btn = gr.Button("合成", variant="primary")
+    with gr.Accordion("高级设置", open=False):
+        basic_ref_text_input = gr.Textbox(
+            label="参考音频对应文本",
+            info="如果留空则自动转录生成. 如果输入文本，则使用输入的文本，建议输入标准文本，转录出来的文本准确性可能不高。",
             lines=2,
+            value="",
         )
         remove_silence = gr.Checkbox(
-            label="Remove Silences",
+            label="删除静音",
             info="The model tends to produce silences, especially on longer audio. We can manually remove silences if needed. Note that this is an experimental feature and may produce strange results. This will also increase generation time.",
             value=False,
         )
         speed_slider = gr.Slider(
-            label="Speed",
+            label="语速设置",
             minimum=0.3,
             maximum=2.0,
             value=1.0,
@@ -225,43 +470,37 @@ with gr.Blocks() as app_tts:
             info="Set the duration of the cross-fade between audio clips.",
         )
 
-    audio_output = gr.Audio(label="Synthesized Audio")
+    audio_output = gr.Audio(label="合成音频")
     spectrogram_output = gr.Image(label="Spectrogram")
+    download_output = gr.File(label="下载文件")
 
     @gpu_decorator
     def basic_tts(
         ref_audio_input,
         ref_text_input,
-        gen_text_input,
         remove_silence,
         cross_fade_duration_slider,
         nfe_slider,
         speed_slider,
+        *gen_texts_input,
     ):
-        audio_out, spectrogram_path, ref_text_out = infer(
+        audio_out, spectrogram_path, ref_text_out, gen_audio_path = infer(
             ref_audio_input,
             ref_text_input,
-            gen_text_input,
+            gen_texts_input,
             tts_model_choice,
             remove_silence,
             cross_fade_duration=cross_fade_duration_slider,
             nfe_step=nfe_slider,
             speed=speed_slider,
         )
-        return audio_out, spectrogram_path, ref_text_out
+        return audio_out, spectrogram_path, ref_text_out, gen_audio_path
 
+    intputs = [ref_audio_input, basic_ref_text_input,remove_silence,cross_fade_duration_slider,nfe_slider,speed_slider] + textboxes
     generate_btn.click(
         basic_tts,
-        inputs=[
-            ref_audio_input,
-            ref_text_input,
-            gen_text_input,
-            remove_silence,
-            cross_fade_duration_slider,
-            nfe_slider,
-            speed_slider,
-        ],
-        outputs=[audio_output, spectrogram_output, ref_text_input],
+        inputs=intputs,
+        outputs=[audio_output, spectrogram_output, basic_ref_text_input, download_output],
     )
 
 
@@ -747,21 +986,14 @@ Have a conversation with an AI using your reference voice!
 with gr.Blocks() as app:
     gr.Markdown(
         """
-# E2/F5 TTS
+# 自定义 F5 TTS
 
-This is a local web UI for F5 TTS with advanced batch processing support. This app supports the following TTS models:
+这是我们修改过的F5-TTS，目前支持泰语音频的生成。
 
-* [F5-TTS](https://arxiv.org/abs/2410.06885) (A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching)
-* [E2 TTS](https://arxiv.org/abs/2406.18009) (Embarrassingly Easy Fully Non-Autoregressive Zero-Shot TTS)
-
-The checkpoints currently support English and Chinese.
-
-If you're having issues, try converting your reference audio to WAV or MP3, clipping it to 15s with  ✂  in the bottom right corner (otherwise might have non-optimal auto-trimmed result).
-
-**NOTE: Reference text will be automatically transcribed with Whisper if not provided. For best results, keep your reference clips short (<15s). Ensure the audio is fully uploaded before generating.**
 """
     )
 
+    
     last_used_custom = files("f5_tts").joinpath("infer/.cache/last_used_custom_model_info.txt")
 
     def load_last_used_custom():
@@ -778,8 +1010,8 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
     def switch_tts_model(new_choice):
         global tts_model_choice
         if new_choice == "Custom":  # override in case webpage is refreshed
-            custom_ckpt_path, custom_vocab_path, custom_model_cfg = load_last_used_custom()
-            tts_model_choice = ["Custom", custom_ckpt_path, custom_vocab_path, json.loads(custom_model_cfg)]
+            custom_ckpt_path, custom_vocab_path, custom_model_cfg, lang = load_last_used_custom()
+            tts_model_choice = ["Custom", custom_ckpt_path, custom_vocab_path, json.loads(custom_model_cfg), lang]
             return (
                 gr.update(visible=True, value=custom_ckpt_path),
                 gr.update(visible=True, value=custom_vocab_path),
@@ -789,67 +1021,152 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
             tts_model_choice = new_choice
             return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
-    def set_custom_model(custom_ckpt_path, custom_vocab_path, custom_model_cfg):
+    def set_custom_model(custom_ckpt_path, custom_vocab_path, custom_model_cfg, language):
         global tts_model_choice
-        tts_model_choice = ["Custom", custom_ckpt_path, custom_vocab_path, json.loads(custom_model_cfg)]
+        tts_model_choice = ["Custom", custom_ckpt_path, custom_vocab_path, json.loads(custom_model_cfg), language]
         with open(last_used_custom, "w", encoding="utf-8") as f:
-            f.write(custom_ckpt_path + "\n" + custom_vocab_path + "\n" + custom_model_cfg + "\n")
+            f.write(custom_ckpt_path + "\n" + custom_vocab_path + "\n" + custom_model_cfg + "\n" + language + "\n")
+
+    def language_change(lang, custom_model_cfg):
+        global models_dict
+        global refs_dict
+        model_dict_list = models_dict.get(lang, [])
+        models = []
+        vocabs = []
+        for model_dict in model_dict_list:
+            models.append(model_dict["model"])
+            vocabs.append(model_dict["vocab"])
+        if len(models) > 0:
+            def_model = models[0]
+        else:
+            def_model = ""
+
+        if len(models) > 0:
+            def_vocab = vocabs[0]
+        else:
+            def_vocab = ""
+
+        lang_alone = lang
+        if "-" in lang_alone:
+            index = lang.find("-")
+            lang_alone = lang_alone[:index]
+
+        ref_audio_dict = refs_dict.get(lang_alone, {})
+        ref_audios = []
+        ref_txts = []
+        for key, value in ref_audio_dict.items():
+            ref_audios.append(key)
+            ref_txts.append(value)
+        if len(ref_audios) > 0 and os.path.exists(ref_audios[0]):
+            def_audio = ref_audios[0]
+        else:
+            def_audio = None
+
+        if len(ref_txts) > 0:
+            def_txt = load_ref_txt(ref_txts[0]).strip()
+        else:
+            def_txt = ""
+        global tts_model_choice
+        tts_model_choice = ["Custom", def_model, def_vocab, json.loads(custom_model_cfg), lang]
+        return gr.update(choices=models, value=def_model), gr.update(choices=vocabs, value=def_vocab), \
+                gr.update(value=def_audio),  gr.update(value=def_txt), gr.update(choices=ref_audios, value=def_audio)
+    
+    def ref_audio_change(lang, audio_path):
+        global refs_dict
+        lang_alone = lang
+        if "-" in lang_alone:
+            index = lang.find("-")
+            lang_alone = lang_alone[:index]
+
+        ref_audio_dict = refs_dict.get(lang_alone, {})
+        def_audio = None
+        def_txt = ""
+        for key, value in ref_audio_dict.items():
+            if key == audio_path:
+                def_audio = key
+                def_txt = load_ref_txt(value).strip()
+                break
+
+        return gr.update(value=def_audio),  gr.update(value=def_txt)
 
     with gr.Row():
-        if not USING_SPACES:
-            choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
-            )
-        else:
-            choose_tts_model = gr.Radio(
-                choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="Choose TTS Model", value=DEFAULT_TTS_MODEL
-            )
+        # if not USING_SPACES:
+        #     choose_tts_model = gr.Radio(
+        #         choices=[DEFAULT_TTS_MODEL, "E2-TTS", "Custom"], label="选择 TTS 模型", value="Custom"
+        #     )
+        # else:
+        #     choose_tts_model = gr.Radio(
+        #         choices=[DEFAULT_TTS_MODEL, "E2-TTS"], label="选择 TTS 模型", value=DEFAULT_TTS_MODEL
+        #     )
+        # 在这里添加新语言的支持，记得在languages里添加语言的英文对照
+        language = gr.Dropdown(
+            choices=list(models_dict.keys()), value="默认", label="语言", allow_custom_value=True
+        )
+        ref_audio = gr.Dropdown(
+            choices=[], value="", label="参考音频", allow_custom_value=True
+        )
+    with gr.Row():
         custom_ckpt_path = gr.Dropdown(
             choices=[DEFAULT_TTS_MODEL_CFG[0]],
-            value=load_last_used_custom()[0],
+            value=DEFAULT_TTS_MODEL_CFG[0],
             allow_custom_value=True,
-            label="Model: local_path | hf://user_id/repo_id/model_ckpt",
-            visible=False,
+            label="模型位置: model_1200k.safetensors",
+            visible=True,
         )
         custom_vocab_path = gr.Dropdown(
             choices=[DEFAULT_TTS_MODEL_CFG[1]],
-            value=load_last_used_custom()[1],
+            value=DEFAULT_TTS_MODEL_CFG[1],
             allow_custom_value=True,
-            label="Vocab: local_path | hf://user_id/repo_id/vocab_file",
-            visible=False,
+            label="VOCAB 文件位置:  vocab.txt",
+            visible=True,
         )
         custom_model_cfg = gr.Dropdown(
             choices=[
                 DEFAULT_TTS_MODEL_CFG[2],
                 json.dumps(dict(dim=768, depth=18, heads=12, ff_mult=2, text_dim=512, conv_layers=4)),
             ],
-            value=load_last_used_custom()[2],
+            value=DEFAULT_TTS_MODEL_CFG[2],
             allow_custom_value=True,
             label="Config: in a dictionary form",
-            visible=False,
+            visible=True,
         )
 
-    choose_tts_model.change(
-        switch_tts_model,
-        inputs=[choose_tts_model],
-        outputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg],
-        show_progress="hidden",
-    )
+    # choose_tts_model.change(
+    #     switch_tts_model,
+    #     inputs=[choose_tts_model],
+    #     outputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg],
+    #     show_progress="hidden",
+    # )
     custom_ckpt_path.change(
         set_custom_model,
-        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg],
+        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
         show_progress="hidden",
     )
     custom_vocab_path.change(
         set_custom_model,
-        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg],
+        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
         show_progress="hidden",
     )
     custom_model_cfg.change(
         set_custom_model,
-        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg],
+        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
         show_progress="hidden",
     )
+
+    language.change(
+        language_change,
+        inputs=[language, custom_model_cfg],
+        outputs=[custom_ckpt_path, custom_vocab_path, ref_audio_input, basic_ref_text_input, ref_audio],
+        show_progress="hidden",
+    )
+    ref_audio.change(
+        ref_audio_change,
+        inputs=[language, ref_audio],
+        outputs=[ref_audio_input, basic_ref_text_input],
+        show_progress="hidden",
+    )
+
+    switch_tts_model("Custom")
 
     gr.TabbedInterface(
         [app_tts, app_multistyle, app_chat, app_credits],

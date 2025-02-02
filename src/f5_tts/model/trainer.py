@@ -319,6 +319,10 @@ class Trainer:
                 initial=progress_bar_initial,
             )
 
+            # min_loss = 1
+            # min_800_model_path = ""
+            # min_1200_model_path = ""
+            # min_1600_model_path = ""
             for batch in current_dataloader:
                 with self.accelerator.accumulate(self.model):
                     text_inputs = batch["text"]
@@ -357,6 +361,50 @@ class Trainer:
                         self.writer.add_scalar("loss", loss.item(), global_update)
                         self.writer.add_scalar("lr", self.scheduler.get_last_lr()[0], global_update)
 
+                # if global_update > 780000 and global_update < 820000:
+                #     if global_update % 1000 == 0 and self.accelerator.sync_gradients:
+                #         if loss.item() < min_loss:
+                #             self.save_checkpoint(global_update)
+                #             min_loss = loss.item()
+                #             cur_min_path = f"{self.checkpoint_path}/model_{global_update}.pt"
+                #             rename_cur_min_path = f"{self.checkpoint_path}/min_800_model_{global_update}.pt"
+                #             try:
+                #                 os.rename(cur_min_path, rename_cur_min_path)
+                #                 if os.path.exists(min_800_model_path):
+                #                     os.remove(min_800_model_path)
+                #                 min_800_model_path = rename_cur_min_path
+                #             except:
+                #                 print("更新最小loss模型失败")
+
+                # if global_update > 1180000 and global_update < 1220000:
+                #     if global_update % 1000 == 0 and self.accelerator.sync_gradients:
+                #         if loss.item() < min_loss:
+                #             self.save_checkpoint(global_update)
+                #             min_loss = loss.item()
+                #             cur_min_path = f"{self.checkpoint_path}/model_{global_update}.pt"
+                #             rename_cur_min_path = f"{self.checkpoint_path}/min_1200_model_{global_update}.pt"
+                #             try:
+                #                 os.rename(cur_min_path, rename_cur_min_path)
+                #                 if os.path.exists(min_1200_model_path):
+                #                     os.remove(min_1200_model_path)
+                #                 min_1200_model_path = rename_cur_min_path
+                #             except:
+                #                 print("更新最小loss模型失败")
+                # if global_update > 1600000 - 20000 and global_update < 1600000 + 20000:
+                #     if global_update % 1000 == 0 and self.accelerator.sync_gradients:
+                #         if loss.item() < min_loss:
+                #             self.save_checkpoint(global_update)
+                #             min_loss = loss.item()
+                #             cur_min_path = f"{self.checkpoint_path}/model_{global_update}.pt"
+                #             rename_cur_min_path = f"{self.checkpoint_path}/min_1600_model_{global_update}.pt"
+                #             try:
+                #                 os.rename(cur_min_path, rename_cur_min_path)
+                #                 if os.path.exists(min_1600_model_path):
+                #                     os.remove(min_1600_model_path)
+                #                 min_1600_model_path = rename_cur_min_path
+                #             except:
+                #                 print("更新最小loss模型失败")
+                
                 if global_update % self.save_per_updates == 0 and self.accelerator.sync_gradients:
                     self.save_checkpoint(global_update)
 

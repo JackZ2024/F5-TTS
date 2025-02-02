@@ -79,19 +79,25 @@ def chunk_text(text, max_chars=135):
     """
     chunks = []
     current_chunk = ""
-    # Split the text into sentences based on punctuation followed by whitespace
-    sentences = re.split(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])", text)
+    texts = text.split("\n")
 
-    for sentence in sentences:
-        if len(current_chunk.encode("utf-8")) + len(sentence.encode("utf-8")) <= max_chars:
-            current_chunk += sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
+    for text in texts:
+        if len(text.encode("utf-8")) <= max_chars:
+            chunks.append(text.strip())
         else:
+            # Split the text into sentences based on punctuation followed by whitespace
+            sentences = re.split(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])", text)
+
+            for sentence in sentences:
+                if len(current_chunk.encode("utf-8")) + len(sentence.encode("utf-8")) <= max_chars:
+                    current_chunk += sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
+
             if current_chunk:
                 chunks.append(current_chunk.strip())
-            current_chunk = sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
-
-    if current_chunk:
-        chunks.append(current_chunk.strip())
 
     return chunks
 
@@ -379,6 +385,7 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
+    lang=""
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
@@ -388,7 +395,7 @@ def infer_process(
         print(f"gen_text {i}", gen_text)
     print("\n")
 
-    show_info(f"Generating audio in {len(gen_text_batches)} batches...")
+    # show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return infer_batch_process(
         (audio, sr),
         ref_text,
@@ -405,6 +412,7 @@ def infer_process(
         speed=speed,
         fix_duration=fix_duration,
         device=device,
+        lang=lang
     )
 
 
@@ -427,6 +435,7 @@ def infer_batch_process(
     speed=1,
     fix_duration=None,
     device=None,
+    lang=""
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -448,7 +457,7 @@ def infer_batch_process(
     for i, gen_text in enumerate(progress.tqdm(gen_text_batches)):
         # Prepare the text
         text_list = [ref_text + gen_text]
-        final_text_list = convert_char_to_pinyin(text_list)
+        final_text_list = convert_char_to_pinyin(text_list, polyphone=True, lang=lang)
 
         ref_audio_len = audio.shape[-1] // hop_length
         if fix_duration is not None:
@@ -468,6 +477,7 @@ def infer_batch_process(
                 steps=nfe_step,
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
+                # no_ref_audio=True
             )
 
             generated = generated.to(torch.float32)

@@ -6,7 +6,10 @@ data/
 ckpts/
 wandb/
 results/
-
+myenv/
+models/
+gen_audio/
+last_audio/
 
 
 # Byte-compiled / optimized / DLL files
