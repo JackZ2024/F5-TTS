@@ -2,13 +2,14 @@ import argparse
 import codecs
 import os
 import re
+import shutil
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
-
 import numpy as np
 import soundfile as sf
 import tomli
+import torch
 from cached_path import cached_path
 from omegaconf import OmegaConf
 
@@ -21,6 +22,7 @@ from f5_tts.infer.utils_infer import (
     sway_sampling_coef,
     speed,
     fix_duration,
+    no_ref_audio,
     infer_process,
     load_model,
     load_vocoder,
@@ -28,7 +30,8 @@ from f5_tts.infer.utils_infer import (
     remove_silence_for_generated_wav,
 )
 from f5_tts.model import DiT, UNetT
-
+from f5_tts.model.dur import DurationPredictor, DurationTransformer
+from pathvalidate import sanitize_filename, sanitize_filepath
 
 parser = argparse.ArgumentParser(
     prog="python3 infer-cli.py",
@@ -42,7 +45,6 @@ parser.add_argument(
     default=os.path.join(files("f5_tts").joinpath("infer/examples/basic"), "basic.toml"),
     help="The configuration file, default see infer/examples/basic/basic.toml",
 )
-
 
 # Note. Not to provide default value here in order to read default from config file
 
@@ -63,6 +65,12 @@ parser.add_argument(
     "--ckpt_file",
     type=str,
     help="The path to model checkpoint .pt, leave blank to use default",
+)
+parser.add_argument(
+    "-p_dur",
+    "--dur_ckpt_file",
+    type=str,
+    help="The path to duration model checkpoint .pt, leave blank to use default",
 )
 parser.add_argument(
     "-v",
@@ -162,13 +170,16 @@ parser.add_argument(
     type=float,
     help=f"Fix the total duration (ref and gen audios) in seconds, default {fix_duration}",
 )
+parser.add_argument(
+    "--no_ref_audio",
+    type=bool,
+    help=f"Drop audio prompt",
+)
 args = parser.parse_args()
-
 
 # config file
 
 config = tomli.load(open(args.config, "rb"))
-
 
 # command-line interface parameters
 
@@ -203,7 +214,7 @@ cfg_strength = args.cfg_strength or config.get("cfg_strength", cfg_strength)
 sway_sampling_coef = args.sway_sampling_coef or config.get("sway_sampling_coef", sway_sampling_coef)
 speed = args.speed or config.get("speed", speed)
 fix_duration = args.fix_duration or config.get("fix_duration", fix_duration)
-
+no_ref_audio = args.no_ref_audio or config.get("no_ref_audio", no_ref_audio)
 
 # patches for pip pkg user
 if "infer/examples/" in ref_audio:
@@ -216,12 +227,10 @@ if "voices" in config:
         if "infer/examples/" in voice_ref_audio:
             config["voices"][voice]["ref_audio"] = str(files("f5_tts").joinpath(f"{voice_ref_audio}"))
 
-
 # ignore gen_text if gen_file provided
 
 if gen_file:
     gen_text = codecs.open(gen_file, "r", "utf-8").read()
-
 
 # output path
 
@@ -229,9 +238,10 @@ wave_path = Path(output_dir) / output_file
 # spectrogram_path = Path(output_dir) / "infer_cli_out.png"
 if save_chunk:
     output_chunk_dir = os.path.join(output_dir, f"{Path(output_file).stem}_chunks")
+    if os.path.exists(output_chunk_dir):
+        shutil.rmtree(output_chunk_dir)
     if not os.path.exists(output_chunk_dir):
         os.makedirs(output_chunk_dir)
-
 
 # load vocoder
 
@@ -241,7 +251,6 @@ elif vocoder_name == "bigvgan":
     vocoder_local_path = "../checkpoints/bigvgan_v2_24khz_100band_256x"
 
 vocoder = load_vocoder(vocoder_name=vocoder_name, is_local=load_vocoder_from_local, local_path=vocoder_local_path)
-
 
 # load TTS model
 
@@ -276,6 +285,28 @@ elif model == "E2-TTS":
 print(f"Using {model}...")
 ema_model = load_model(model_cls, model_cfg, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file)
 
+dur_model = None
+if args.dur_ckpt_file:
+    vocab = {v: i for i, v in
+             enumerate(Path(vocab_file).read_text(encoding='utf-8').split("\n"))}
+
+    dur_model = DurationPredictor(
+        transformer=DurationTransformer(
+            dim=512,
+            depth=8,
+            heads=8,
+            text_dim=512,
+            ff_mult=2,
+            conv_layers=2,
+            text_num_embeds=len(vocab) - 1,
+        ),
+        vocab_char_map=vocab,
+    ).to(device=ema_model.device)
+
+    # Load weights
+    weights = torch.load(args.dur_ckpt_file, map_location=ema_model.device, weights_only=True)
+    dur_model.load_state_dict(weights["model_state_dict"])
+
 
 # inference process
 
@@ -297,7 +328,8 @@ def main():
 
     generated_audio_segments = []
     reg1 = r"(?=\[\w+\])"
-    chunks = re.split(reg1, gen_text)
+    # chunks = re.split(reg1, gen_text)
+    chunks = gen_text.split("\n")
     reg2 = r"\[(\w+)\]"
     for text in chunks:
         if not text.strip():
@@ -330,6 +362,8 @@ def main():
             sway_sampling_coef=sway_sampling_coef,
             speed=speed,
             fix_duration=fix_duration,
+            no_ref_audio=no_ref_audio,
+            dur_model=dur_model
         )
         generated_audio_segments.append(audio_segment)
 
@@ -337,7 +371,8 @@ def main():
             if len(gen_text_) > 200:
                 gen_text_ = gen_text_[:200] + " ... "
             sf.write(
-                os.path.join(output_chunk_dir, f"{len(generated_audio_segments)-1}_{gen_text_}.wav"),
+                os.path.join(output_chunk_dir,
+                             sanitize_filename(f"{len(generated_audio_segments):04d}_{gen_text_}") + ".wav"),
                 audio_segment,
                 final_sample_rate,
             )

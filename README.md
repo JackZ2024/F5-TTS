@@ -124,6 +124,17 @@ Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 f5-tts_finetune-gradio
 ```
 
+### 2. Duration model
+Duration model is shared by lucasnewman in his f5-tts-mlx project issues:   
+https://github.com/lucasnewman/f5-tts-mlx/issues/17#issuecomment-2453045703
+
+Thanks very much for lucasnewman's contribute.
+
+#### 2.1 Duration model libritts dataset, if your dataset is LJSpeech, you can use f5_tts/scripts/ljspeech2libritts.py to convert it
+#### 2.2 Run the duration train cli
+```bash
+f5-tts_dur-train-cli.exe --dataset_folder your_libritts_dataset
+```
 
 ## [Evaluation](src/f5_tts/eval)
 
@@ -157,6 +168,7 @@ Note: Some model components have linting exceptions for E722 to accommodate tens
 - [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner) for speech edit test
 - [mrfakename](https://x.com/realmrfakename) huggingface space demo ~
 - [f5-tts-mlx](https://github.com/lucasnewman/f5-tts-mlx/tree/main) Implementation with MLX framework by [Lucas Newman](https://github.com/lucasnewman)
+- [Duration model](https://github.com/lucasnewman/f5-tts-mlx/issues/17#issuecomment-2453045703) by [Lucas Newman](https://github.com/lucasnewman)
 - [F5-TTS-ONNX](https://github.com/DakeQQ/F5-TTS-ONNX) ONNX Runtime version by [DakeQQ](https://github.com/DakeQQ)
 
 ## Citation
