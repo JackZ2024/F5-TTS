@@ -79,6 +79,7 @@ def save_settings(
     mixed_precision,
     logger,
     ch_8bit_adam,
+    vocoder
 ):
     path_project = os.path.join(path_project_ckpts, project_name)
     os.makedirs(path_project, exist_ok=True)
@@ -104,6 +105,7 @@ def save_settings(
         "mixed_precision": mixed_precision,
         "logger": logger,
         "bnb_optimizer": ch_8bit_adam,
+        "vocoder": vocoder
     }
     with open(file_setting, "w") as f:
         json.dump(settings, f, indent=4)
@@ -137,6 +139,7 @@ def load_settings(project_name):
         "mixed_precision": "none",
         "logger": "wandb",
         "bnb_optimizer": False,
+        "vocoder": "vocos"
     }
 
     # Load settings from file if it exists
@@ -166,6 +169,7 @@ def load_settings(project_name):
         default_settings["mixed_precision"],
         default_settings["logger"],
         default_settings["bnb_optimizer"],
+        default_settings["vocoder"]
     )
 
 
@@ -382,6 +386,7 @@ def start_training(
     stream=False,
     logger="wandb",
     ch_8bit_adam=False,
+    vocoder="vocos"
 ):
     global training_process, tts_api, stop_signal
 
@@ -445,6 +450,7 @@ def start_training(
         f" --keep_last_n_checkpoints {keep_last_n_checkpoints}"
         f" --last_per_updates {last_per_updates}"
         f" --dataset_name {dataset_name}"
+        f" --vocoder {vocoder}"
     )
 
     if finetune:
@@ -486,6 +492,7 @@ def start_training(
         mixed_precision,
         logger,
         ch_8bit_adam,
+        vocoder
     )
 
     try:
@@ -1575,6 +1582,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
             with gr.Row():
                 exp_name = gr.Radio(label="Model", choices=["F5TTS_Base", "E2TTS_Base"], value="F5TTS_Base")
                 learning_rate = gr.Number(label="Learning Rate", value=1e-5, step=1e-5)
+                vocoder = gr.Radio(label="Vocoder", choices=["vocos", "bigvgan", "bigvgan44k"], value="vocos")
 
             with gr.Row():
                 batch_size_per_gpu = gr.Number(label="Batch Size per GPU", value=1000)
@@ -1627,6 +1635,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     mixed_precision_value,
                     logger_value,
                     bnb_optimizer_value,
+                    vocoder
                 ) = load_settings(projects_selelect)
 
                 # Assigning values to the respective components
@@ -1649,6 +1658,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                 mixed_precision.value = mixed_precision_value
                 cd_logger.value = logger_value
                 ch_8bit_adam.value = bnb_optimizer_value
+                vocoder.value = vocoder
 
             ch_stream = gr.Checkbox(label="Stream Output Experiment", value=True)
             txt_info_train = gr.Text(label="Info", value="")
@@ -1709,6 +1719,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     ch_stream,
                     cd_logger,
                     ch_8bit_adam,
+                    vocoder
                 ],
                 outputs=[txt_info_train, start_button, stop_button],
             )
@@ -1763,6 +1774,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     mixed_precision,  # 17
                     cd_logger,  # 18
                     ch_8bit_adam,  # 19
+                    vocoder,     # 20
                 ]
                 return output_components
 

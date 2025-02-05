@@ -132,7 +132,7 @@ parser.add_argument(
 parser.add_argument(
     "--vocoder_name",
     type=str,
-    choices=["vocos", "bigvgan"],
+    choices=["vocos", "bigvgan", "bigvgan44k"],
     help=f"Used vocoder name: vocos | bigvgan, default {mel_spec_type}",
 )
 parser.add_argument(
@@ -249,6 +249,8 @@ if vocoder_name == "vocos":
     vocoder_local_path = "../checkpoints/vocos-mel-24khz"
 elif vocoder_name == "bigvgan":
     vocoder_local_path = "../checkpoints/bigvgan_v2_24khz_100band_256x"
+elif vocoder_name == "bigvgan44k":
+    vocoder_local_path = "../checkpoints/bigvgan_v2_44khz_128band_512x"
 
 vocoder = load_vocoder(vocoder_name=vocoder_name, is_local=load_vocoder_from_local, local_path=vocoder_local_path)
 
@@ -264,7 +266,7 @@ if model == "F5-TTS":
             ckpt_step = 1200000
             ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{exp_name}/model_{ckpt_step}.safetensors"))
             # ckpt_file = f"ckpts/{exp_name}/model_{ckpt_step}.pt"  # .pt | .safetensors; local path
-        elif vocoder_name == "bigvgan":
+        elif "bigvgan" in vocoder_name :
             repo_name = "F5-TTS"
             exp_name = "F5TTS_Base_bigvgan"
             ckpt_step = 1250000
