@@ -66,7 +66,7 @@ def concatenate_audio_with_labels(files, inputs):
         if label[-1] in punc_pause_map:
             combined_audio += create_silence(punc_pause_map[label[-1]])
         else:
-            combined_audio += create_silence(100)  # 不是标点
+            combined_audio += create_silence(150)  # 不是标点
 
     return combined_audio
 

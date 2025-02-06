@@ -148,8 +148,8 @@ def initialize_asr_pipeline(device: str = device, dtype=None):
         dtype = (
             torch.float16
             if "cuda" in device
-            and torch.cuda.get_device_properties(device).major >= 6
-            and not torch.cuda.get_device_name().endswith("[ZLUDA]")
+               and torch.cuda.get_device_properties(device).major >= 6
+               and not torch.cuda.get_device_name().endswith("[ZLUDA]")
             else torch.float32
         )
     global asr_pipe
@@ -185,8 +185,8 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
         dtype = (
             torch.float16
             if "cuda" in device
-            and torch.cuda.get_device_properties(device).major >= 6
-            and not torch.cuda.get_device_name().endswith("[ZLUDA]")
+               and torch.cuda.get_device_properties(device).major >= 6
+               and not torch.cuda.get_device_name().endswith("[ZLUDA]")
             else torch.float32
         )
     model = model.to(dtype)
@@ -229,14 +229,14 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
 
 
 def load_model(
-    model_cls,
-    model_cfg,
-    ckpt_path,
-    mel_spec_type=mel_spec_type,
-    vocab_file="",
-    ode_method=ode_method,
-    use_ema=True,
-    device=device,
+        model_cls,
+        model_cfg,
+        ckpt_path,
+        mel_spec_type=mel_spec_type,
+        vocab_file="",
+        ode_method=ode_method,
+        use_ema=True,
+        device=device,
 ):
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
@@ -363,35 +363,34 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
 
 
 def infer_process(
-    ref_audio,
-    ref_text,
-    gen_text,
-    model_obj,
-    vocoder,
-    mel_spec_type=mel_spec_type,
-    show_info=print,
-    progress=tqdm,
-    target_rms=target_rms,
-    cross_fade_duration=cross_fade_duration,
-    nfe_step=nfe_step,
-    cfg_strength=cfg_strength,
-    sway_sampling_coef=sway_sampling_coef,
-    speed=speed,
-    fix_duration=fix_duration,
-    device=device,
-    no_ref_audio=no_ref_audio,
-    dur_model=None
+        ref_audio,
+        ref_text,
+        gen_text,
+        model_obj,
+        vocoder,
+        mel_spec_type=mel_spec_type,
+        show_info=print,
+        progress=tqdm,
+        target_rms=target_rms,
+        cross_fade_duration=cross_fade_duration,
+        nfe_step=nfe_step,
+        cfg_strength=cfg_strength,
+        sway_sampling_coef=sway_sampling_coef,
+        speed=speed,
+        fix_duration=fix_duration,
+        device=device,
+        no_ref_audio=no_ref_audio,
+        dur_model=None
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
-    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (17 - audio.shape[-1] / sr))
+    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (17*speed - audio.shape[-1] / sr))
+    print("max_chars", max_chars)
+    print("gen_chars", len(gen_text.encode('utf-8')))
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
     print("\n")
-
-    if len(gen_text_batches) > 1:
-        print(f"\033[31mToo long gen text: {gen_text}\033[0m")
 
     show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return infer_batch_process(
@@ -419,23 +418,23 @@ def infer_process(
 
 
 def infer_batch_process(
-    ref_audio,
-    ref_text,
-    gen_text_batches,
-    model_obj,
-    vocoder,
-    mel_spec_type="vocos",
-    progress=tqdm,
-    target_rms=0.1,
-    cross_fade_duration=0.15,
-    nfe_step=32,
-    cfg_strength=2.0,
-    sway_sampling_coef=-1,
-    speed=1,
-    fix_duration=None,
-    device=None,
-    no_ref_audio=False,
-    dur_model = None
+        ref_audio,
+        ref_text,
+        gen_text_batches,
+        model_obj,
+        vocoder,
+        mel_spec_type="vocos",
+        progress=tqdm,
+        target_rms=0.1,
+        cross_fade_duration=0.15,
+        nfe_step=32,
+        cfg_strength=2.0,
+        sway_sampling_coef=-1,
+        speed=1,
+        fix_duration=None,
+        device=None,
+        no_ref_audio=False,
+        dur_model=None
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -477,6 +476,9 @@ def infer_batch_process(
                 ref_text_len = len(ref_text.encode("utf-8"))
                 gen_text_len = len(gen_text.encode("utf-8"))
                 duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
+
+        if duration > 17 * target_sample_rate / hop_length:
+            print(f"\033[31mToo long gen text({duration*hop_length/target_sample_rate}s): {gen_text}\033[0m")
 
         # inference
         with torch.inference_mode():
