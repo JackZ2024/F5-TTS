@@ -766,8 +766,11 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
     path_project = os.path.join(path_data, name_project)
     path_project_wavs = os.path.join(path_project, "wavs")
     file_metadata = os.path.join(path_project, "metadata.csv")
+    test_file = os.path.join(path_project, "test_file_names.csv")
     file_raw = os.path.join(path_project, "raw.arrow")
+    test_file_raw = os.path.join(path_project, "test_raw.arrow")
     file_duration = os.path.join(path_project, "duration.json")
+    test_file_duration = os.path.join(path_project, "test_duration.json")
     file_vocab = os.path.join(path_project, "vocab.txt")
 
     if not os.path.isfile(file_metadata):
@@ -776,13 +779,22 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
     with open(file_metadata, "r", encoding="utf-8-sig") as f:
         data = f.read()
 
+    if os.path.exists(test_file):
+        with open(test_file, "r", encoding="utf-8-sig") as f:
+            test_file_names = f.read().split("\n")
+    else:
+        test_file_names = []
+
     audio_path_list = []
     text_list = []
     duration_list = []
+    test_duration_list = []
 
     count = data.split("\n")
-    lenght = 0
-    result = []
+    train_duration = 0
+    test_duration = 0
+    train_result = []
+    test_result = []
     error_files = []
     text_vocab_set = set()
     for line in progress.tqdm(data.split("\n"), total=count):
@@ -804,11 +816,11 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
             print(f"Error processing {file_audio}: {e}")
             continue
 
-        if duration < 1 or duration > 25:
-            if duration > 25:
-                error_files.append([file_audio, "duration > 25 sec"])
-            if duration < 1:
-                error_files.append([file_audio, "duration < 1 sec "])
+        if duration < 2 or duration > 17:
+            if duration > 17:
+                error_files.append([file_audio, "duration > 17 sec"])
+            if duration < 2:
+                error_files.append([file_audio, "duration < 2 sec "])
             continue
         if len(text) < 3:
             error_files.append([file_audio, "very small text len 3"])
@@ -818,14 +830,19 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
         text = convert_char_to_pinyin([text], polyphone=True)[0]
 
         audio_path_list.append(file_audio)
-        duration_list.append(duration)
         text_list.append(text)
 
-        result.append({"audio_path": file_audio, "text": text, "duration": duration})
+        if name_audio in test_file_names:
+            test_result.append({"audio_path": file_audio, "text": text, "duration": duration})
+            test_duration += duration
+            test_duration_list.append(duration)
+        else:
+            train_result.append({"audio_path": file_audio, "text": text, "duration": duration})
+            train_duration += duration
+            duration_list.append(duration)
+
         if ch_tokenizer:
             text_vocab_set.update(list(text))
-
-        lenght += duration
 
     if duration_list == []:
         return f"Error: No audio files found in the specified path : {path_project_wavs}", ""
@@ -834,11 +851,19 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
     max_second = round(max(duration_list), 2)
 
     with ArrowWriter(path=file_raw, writer_batch_size=1) as writer:
-        for line in progress.tqdm(result, total=len(result), desc="prepare data"):
+        for line in progress.tqdm(train_result, total=len(train_result), desc="prepare data"):
+            writer.write(line)
+
+    with ArrowWriter(path=test_file_raw, writer_batch_size=1) as writer:
+        for line in progress.tqdm(test_result, total=len(test_result), desc="prepare data"):
             writer.write(line)
 
     with open(file_duration, "w") as f:
         json.dump({"duration": duration_list}, f, ensure_ascii=False)
+
+    if len(test_file_duration) > 0:
+        with open(test_file_duration, "w") as f:
+            json.dump({"duration": test_duration_list}, f, ensure_ascii=False)
 
     new_vocal = ""
     if not ch_tokenizer:
@@ -867,7 +892,7 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
         error_text = ""
 
     return (
-        f"prepare complete \nsamples : {len(text_list)}\ntime data : {format_seconds_to_hms(lenght)}\nmin sec : {min_second}\nmax sec : {max_second}\nfile_arrow : {file_raw}\nvocab : {vocab_size}\n{error_text}",
+        f"prepare complete \nTotal samples : {len(text_list)}\nTrain samples : {len(train_result)}\nTrain time data : {format_seconds_to_hms(train_duration)}\nTest samples : {len(test_result)}\nTest time data : {format_seconds_to_hms(test_duration)}\nmin sec : {min_second}\nmax sec : {max_second}\nfile_arrow : {file_raw}\nvocab : {vocab_size}\n{error_text}",
         new_vocal,
     )
 
@@ -1610,8 +1635,8 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
             with gr.Row():
                 ch_8bit_adam = gr.Checkbox(label="Use 8-bit Adam optimizer")
-                mixed_precision = gr.Radio(label="mixed_precision", choices=["none", "fp16", "bf16"], value="none")
-                cd_logger = gr.Radio(label="logger", choices=["wandb", "tensorboard"], value="wandb")
+                mixed_precision = gr.Radio(label="mixed_precision", choices=["none", "fp16", "bf16"], value="fp16")
+                cd_logger = gr.Radio(label="logger", choices=["wandb", "tensorboard"], value="tensorboard")
                 start_button = gr.Button("Start Training")
                 stop_button = gr.Button("Stop Training", interactive=False)
 
