@@ -79,25 +79,19 @@ def chunk_text(text, max_chars=135):
     """
     chunks = []
     current_chunk = ""
-    texts = text.split("\n")
+    # Split the text into sentences based on punctuation followed by whitespace
+    sentences = re.split(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])", text)
 
-    for text in texts:
-        if len(text.encode("utf-8")) <= max_chars:
-            chunks.append(text.strip())
+    for sentence in sentences:
+        if len(current_chunk.encode("utf-8")) + len(sentence.encode("utf-8")) <= max_chars:
+            current_chunk += sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
         else:
-            # Split the text into sentences based on punctuation followed by whitespace
-            sentences = re.split(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])", text)
-
-            for sentence in sentences:
-                if len(current_chunk.encode("utf-8")) + len(sentence.encode("utf-8")) <= max_chars:
-                    current_chunk += sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
-
             if current_chunk:
                 chunks.append(current_chunk.strip())
+            current_chunk = sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
+
+    if current_chunk:
+        chunks.append(current_chunk.strip())
 
     return chunks
 

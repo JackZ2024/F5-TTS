@@ -10,6 +10,7 @@ myenv/
 models/
 gen_audio/
 last_audio/
+refs/
 
 
 # Byte-compiled / optimized / DLL files

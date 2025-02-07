@@ -227,6 +227,48 @@ def load_refs_list():
 
     return refs_dict
 
+# 组合生成的音频，并在中间根据参数添加静音
+def get_final_wave(cross_fade_duration, generated_waves, final_sample_rate):
+    final_wave = None
+    # Combine all generated waves with cross-fading
+    if cross_fade_duration <= 0:
+        # Simply concatenate
+        final_wave = np.concatenate(generated_waves)
+    else:
+        final_wave = generated_waves[0]
+        for i in range(1, len(generated_waves)):
+            prev_wave = final_wave
+            next_wave = generated_waves[i]
+
+            # Calculate cross-fade samples, ensuring it does not exceed wave lengths
+            cross_fade_samples = int(cross_fade_duration * final_sample_rate)
+            cross_fade_samples = min(cross_fade_samples, len(prev_wave), len(next_wave))
+
+            if cross_fade_samples <= 0:
+                # No overlap possible, concatenate
+                final_wave = np.concatenate([prev_wave, next_wave])
+                continue
+
+            # Overlapping parts
+            prev_overlap = prev_wave[-cross_fade_samples:]
+            next_overlap = next_wave[:cross_fade_samples]
+
+            # Fade out and fade in
+            fade_out = np.linspace(1, 0, cross_fade_samples)
+            fade_in = np.linspace(0, 1, cross_fade_samples)
+
+            # Cross-faded overlap
+            cross_faded_overlap = prev_overlap * fade_out + next_overlap * fade_in
+
+            # Combine
+            new_wave = np.concatenate(
+                [prev_wave[:-cross_fade_samples], cross_faded_overlap, next_wave[cross_fade_samples:]]
+            )
+
+            final_wave = new_wave
+
+    return final_wave
+
 
 F5TTS_ema_model = None
 E2TTS_ema_model = None
@@ -273,6 +315,7 @@ def infer(
     nfe_step=32,
     speed=1,
     show_info=gr.Info,
+    save_line_audio = False,
 ):
     if not ref_audio_orig:
         gr.Warning("Please provide reference audio.")
@@ -305,7 +348,7 @@ def infer(
             pre_custom_path = model[1]
         ema_model = custom_ema_model
 
-    gen_wav_files = []
+    # gen_wav_files = []
     gen_audio_path = "gen_audio"
     if not os.path.exists(gen_audio_path):
         os.mkdir(gen_audio_path)
@@ -317,67 +360,72 @@ def infer(
             except:
                 pass
     count = 0
+    generated_waves = []
+    spectrograms = []
     for i in range(len(gen_texts)):
-        gen_text = gen_texts[i]
-        if gen_text.strip() == "":
+        gen_text_box = gen_texts[i]
+        if gen_text_box.strip() == "":
             continue
-        # gen_text_list = gen_text_length.split("\n")
+        gen_text_list = gen_text_box.split("\n")
         show_info(f"开始生成第 { i+ 1} 个文本框的音频")
-        # progress=gr.Progress()
-        # for j, gen_text in enumerate(progress.tqdm(gen_text_list, desc="Processing")):
+        progress=gr.Progress()
+        start_pos = count
+        for j, gen_text in enumerate(progress.tqdm(gen_text_list, desc="Processing")):
 
-        #     if gen_text.strip() == "":
-        #         continue
-        gen_text = gen_text.replace(" ", ",")
-        final_wave, final_sample_rate, combined_spectrogram = infer_process(
-            ref_audio,
-            ref_text,
-            gen_text,
-            ema_model,
-            vocoder,
-            cross_fade_duration=cross_fade_duration,
-            nfe_step=nfe_step,
-            speed=speed,
-            show_info=show_info,
-            progress=gr.Progress(),
-            lang=lang,
-        )
+            if gen_text.strip() == "":
+                continue
+            # gen_text = gen_text.replace(" ", ",")
+            final_wave, final_sample_rate, combined_spectrogram = infer_process(
+                ref_audio,
+                ref_text,
+                gen_text,
+                ema_model,
+                vocoder,
+                cross_fade_duration=cross_fade_duration,
+                nfe_step=nfe_step,
+                speed=speed,
+                show_info=show_info,
+                # progress=gr.Progress(),
+                lang=lang,
+            )
 
-        audio_filepath = gen_audio_path + f"/gen_audio_{count}.wav"
-        sf.write(audio_filepath, final_wave, final_sample_rate, 'PCM_24')
-        # 把文件路径放到列表里面，就不用自己再遍历了
-        gen_wav_files.append(audio_filepath)
-        count += 1
+            generated_waves.append(final_wave)
+            spectrograms.append(combined_spectrogram)
 
-    gen_audio = None
-    if len(gen_wav_files) > 0:
-        gen_audio = AudioSegment.from_file(gen_wav_files[0]) 
+            audio_filepath = gen_audio_path + f"/gen_audio_{count}.wav"
+            count += 1
+            if save_line_audio:
+                sf.write(audio_filepath, final_wave, final_sample_rate, 'PCM_24')
 
-    for i in range(1, len(gen_wav_files)):
-        gen_audio += AudioSegment.from_file(gen_wav_files[i]) 
+        # 如果按行保存了，就不再按文本框保存，如果没有按行保存，那就按文本框保存
+        if not save_line_audio:
+            final_waves = get_final_wave(cross_fade_duration, generated_waves[start_pos:], final_sample_rate)
+            audio_filepath = gen_audio_path + f"/gen_audio_{i}.wav"
+            sf.write(audio_filepath, final_waves, final_sample_rate, 'PCM_24')
 
     # 导出合并后的24Khz音频
     last_gen_audio_path = "last_audio/gen_audio.wav"
-    if gen_audio:
+    final_waves = None
+    if len(generated_waves) > 0:
         if not os.path.exists("last_audio"):
             os.mkdir("last_audio")
-        gen_audio.export(last_gen_audio_path, format="wav", parameters=["-c:a", "pcm_s24le"])
+        final_waves = get_final_wave(cross_fade_duration, generated_waves, final_sample_rate)
+        sf.write(last_gen_audio_path, final_waves, final_sample_rate, 'PCM_24')
 
     # Remove silence
-    if remove_silence and gen_audio:
+    if remove_silence and os.path.exists(last_gen_audio_path):
         remove_silence_for_generated_wav(last_gen_audio_path)
-        final_wave, _ = torchaudio.load(last_gen_audio_path)
-        final_wave = final_wave.squeeze().cpu().numpy()
-    elif gen_audio:
-        final_wave, _ = torchaudio.load(last_gen_audio_path)
-        final_wave = final_wave.squeeze().cpu().numpy()
-
+        final_waves, _ = torchaudio.load(last_gen_audio_path)
+        final_waves = final_waves.squeeze().cpu().numpy()
+    
     # Save the spectrogram
+    # Create a combined spectrogram
+    combined_spectrogram = np.concatenate(spectrograms, axis=1)
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_spectrogram:
         spectrogram_path = tmp_spectrogram.name
         save_spectrogram(combined_spectrogram, spectrogram_path)
 
-    return (final_sample_rate, final_wave), spectrogram_path, ref_text, last_gen_audio_path
+    return (final_sample_rate, final_waves), spectrogram_path, ref_text, last_gen_audio_path
 
 
 def create_textboxes(num):
@@ -449,7 +497,7 @@ with gr.Blocks() as app_tts:
             label="语速设置",
             minimum=0.3,
             maximum=2.0,
-            value=1.0,
+            value=0.9,
             step=0.1,
             info="Adjust the speed of the audio.",
         )
@@ -457,7 +505,7 @@ with gr.Blocks() as app_tts:
             label="NFE Steps",
             minimum=4,
             maximum=64,
-            value=32,
+            value=64,
             step=2,
             info="Set the number of denoising steps.",
         )
@@ -1023,9 +1071,18 @@ with gr.Blocks() as app:
 
     def set_custom_model(custom_ckpt_path, custom_vocab_path, custom_model_cfg, language):
         global tts_model_choice
+        global models_dict
+        model_dict_list = models_dict.get(language, [])
+        for model_dict in model_dict_list:
+            if model_dict["model"] == custom_ckpt_path:
+                custom_vocab_path = model_dict["vocab"]
+                break
+
         tts_model_choice = ["Custom", custom_ckpt_path, custom_vocab_path, json.loads(custom_model_cfg), language]
         with open(last_used_custom, "w", encoding="utf-8") as f:
             f.write(custom_ckpt_path + "\n" + custom_vocab_path + "\n" + custom_model_cfg + "\n" + language + "\n")
+
+        return gr.update(value=custom_vocab_path)
 
     def language_change(lang, custom_model_cfg):
         global models_dict
@@ -1118,7 +1175,7 @@ with gr.Blocks() as app:
             value=DEFAULT_TTS_MODEL_CFG[1],
             allow_custom_value=True,
             label="VOCAB 文件位置:  vocab.txt",
-            visible=True,
+            visible=False,
         )
         custom_model_cfg = gr.Dropdown(
             choices=[
@@ -1128,7 +1185,7 @@ with gr.Blocks() as app:
             value=DEFAULT_TTS_MODEL_CFG[2],
             allow_custom_value=True,
             label="Config: in a dictionary form",
-            visible=True,
+            visible=False,
         )
 
     # choose_tts_model.change(
@@ -1140,18 +1197,19 @@ with gr.Blocks() as app:
     custom_ckpt_path.change(
         set_custom_model,
         inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
+        outputs=[custom_vocab_path],
         show_progress="hidden",
     )
-    custom_vocab_path.change(
-        set_custom_model,
-        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
-        show_progress="hidden",
-    )
-    custom_model_cfg.change(
-        set_custom_model,
-        inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
-        show_progress="hidden",
-    )
+    # custom_vocab_path.change(
+    #     set_custom_model,
+    #     inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
+    #     show_progress="hidden",
+    # )
+    # custom_model_cfg.change(
+    #     set_custom_model,
+    #     inputs=[custom_ckpt_path, custom_vocab_path, custom_model_cfg, language],
+    #     show_progress="hidden",
+    # )
 
     language.change(
         language_change,

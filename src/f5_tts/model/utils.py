@@ -139,7 +139,8 @@ def convert_char_to_pinyin(text_list, polyphone=True, lang=""):
 
     final_text_list = []
     custom_trans = str.maketrans(
-        {";": ",", "“": '', "”": '', "‘": "'", "’": "'", "„":""}
+        # {";": ",", "“": '"', "”": '"', "‘": "'", "’": "'"}
+        {"“": '', "”": '', "‘": "", "’": "", "\"": "", "'": ""}
     )  # add custom trans here, to address oov
 
     def is_chinese(c):
@@ -149,7 +150,7 @@ def convert_char_to_pinyin(text_list, polyphone=True, lang=""):
 
     for text in text_list:
         char_list = []
-        text = text.translate(custom_trans)
+        text = text.translate(custom_trans).replace("...", "")
         if lang.lower() == "thai_v1":
             texts = text
             for seg in texts:
