@@ -40,7 +40,14 @@ punc_pause_map = {
     ";": 1000,
     ",": 500,
     ":": 500,
+}
 
+custom_pause_map = {
+    "0010": 300,
+    "0020": 300,
+    "0024": 300,
+    "0049": 300,
+    "0072": 300,
 }
 
 
@@ -63,10 +70,15 @@ def concatenate_audio_with_labels(files, inputs):
         # 添加到拼接音频
         combined_audio += trimmed_audio
 
-        if label[-1] in punc_pause_map:
-            combined_audio += create_silence(punc_pause_map[label[-1]])
-        else:
-            combined_audio += create_silence(150)  # 不是标点
+        order_num = os.path.basename(file).split("_")[0]
+        if order_num in custom_pause_map:
+            print("自定义间距", order_num)
+            combined_audio += create_silence(custom_pause_map[order_num])
+        else:     # 根据句末标点
+            if label[-1] in punc_pause_map:
+                combined_audio += create_silence(punc_pause_map[label[-1]])
+            else:
+                combined_audio += create_silence(150)  # 不是标点
 
     return combined_audio
 
@@ -78,7 +90,6 @@ def merge(gen_file, chunk_folder):
     texts = open(gen_file, 'r', encoding='utf-8').read().split("\n")
     files = os.listdir(chunk_folder)
     files = [os.path.join(chunk_folder, file) for file in files if file.endswith(".wav")]
-    print(files)
     result_audio = concatenate_audio_with_labels(files, texts)
     result_audio.export("output.wav", format="wav")
 
