@@ -488,11 +488,17 @@ with gr.Blocks() as app_tts:
             lines=2,
             value="",
         )
-        remove_silence = gr.Checkbox(
-            label="删除静音",
-            info="The model tends to produce silences, especially on longer audio. We can manually remove silences if needed. Note that this is an experimental feature and may produce strange results. This will also increase generation time.",
-            value=False,
-        )
+        with gr.Row():
+            remove_silence = gr.Checkbox(
+                label="删除静音",
+                info="The model tends to produce silences, especially on longer audio. We can manually remove silences if needed. Note that this is an experimental feature and may produce strange results. This will also increase generation time.",
+                value=False,
+            )
+            save_line_audio = gr.Checkbox(
+                label="按行保存音频",
+                info="勾选此项，中间结果会每行保存一个音频，不勾选，则每一个文本框保存一个音频。",
+                value=False,
+            )
         speed_slider = gr.Slider(
             label="语速设置",
             minimum=0.3,
@@ -527,6 +533,7 @@ with gr.Blocks() as app_tts:
         ref_audio_input,
         ref_text_input,
         remove_silence,
+        save_line_audio,
         cross_fade_duration_slider,
         nfe_slider,
         speed_slider,
@@ -541,10 +548,13 @@ with gr.Blocks() as app_tts:
             cross_fade_duration=cross_fade_duration_slider,
             nfe_step=nfe_slider,
             speed=speed_slider,
+            save_line_audio=save_line_audio,
         )
         return audio_out, spectrogram_path, ref_text_out, gen_audio_path
 
-    intputs = [ref_audio_input, basic_ref_text_input,remove_silence,cross_fade_duration_slider,nfe_slider,speed_slider] + textboxes
+    intputs = [ref_audio_input, basic_ref_text_input, remove_silence, save_line_audio, \
+               cross_fade_duration_slider, nfe_slider, speed_slider] + textboxes
+    
     generate_btn.click(
         basic_tts,
         inputs=intputs,
