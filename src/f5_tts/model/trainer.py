@@ -48,7 +48,7 @@ class Trainer:
         accelerate_kwargs: dict = dict(),
         ema_kwargs: dict = dict(),
         bnb_optimizer: bool = False,
-        mel_spec_type: str = "vocos",  # "vocos" | "bigvgan"
+        mel_spec_type: str = "vocos",  # "vocos" | "bigvgan" | "bigvgan44k"
         is_local_vocoder: bool = False,  # use local path vocoder
         local_vocoder_path: str = "",  # local vocoder path
     ):
@@ -160,10 +160,14 @@ class Trainer:
                     return
                 self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_{update}.pt")
                 if self.keep_last_n_checkpoints > 0:
+                    # Updated logic to exclude pretrained model from rotation
                     checkpoints = [
                         f
                         for f in os.listdir(self.checkpoint_path)
-                        if f.startswith("model_") and f.endswith(".pt") and f != "model_last.pt"
+                        if f.startswith("model_")
+                        and not f.startswith("pretrained_")  # Exclude pretrained models
+                        and f.endswith(".pt")
+                        and f != "model_last.pt"
                     ]
                     checkpoints.sort(key=lambda x: int(x.split("_")[1].split(".")[0]))
                     while len(checkpoints) > self.keep_last_n_checkpoints:
@@ -183,10 +187,24 @@ class Trainer:
         if "model_last.pt" in os.listdir(self.checkpoint_path):
             latest_checkpoint = "model_last.pt"
         else:
-            latest_checkpoint = sorted(
-                [f for f in os.listdir(self.checkpoint_path) if f.endswith(".pt")],
-                key=lambda x: int("".join(filter(str.isdigit, x))),
-            )[-1]
+            # Updated to consider pretrained models for loading but prioritize training checkpoints
+            all_checkpoints = [
+                f
+                for f in os.listdir(self.checkpoint_path)
+                if (f.startswith("model_") or f.startswith("pretrained_")) and f.endswith(".pt")
+            ]
+
+            # First try to find regular training checkpoints
+            training_checkpoints = [f for f in all_checkpoints if f.startswith("model_") and f != "model_last.pt"]
+            if training_checkpoints:
+                latest_checkpoint = sorted(
+                    training_checkpoints,
+                    key=lambda x: int("".join(filter(str.isdigit, x))),
+                )[-1]
+            else:
+                # If no training checkpoints, use pretrained model
+                latest_checkpoint = next(f for f in all_checkpoints if f.startswith("pretrained_"))
+
         # checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", map_location=self.accelerator.device)  # rather use accelerator.load_state ಥ_ಥ
         checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True, map_location="cpu")
 
@@ -351,8 +369,9 @@ class Trainer:
                     self.scheduler.step()
                     self.optimizer.zero_grad()
 
-                if self.is_main and self.accelerator.sync_gradients:
-                    self.ema_model.update()
+                if self.accelerator.sync_gradients:
+                    if self.is_main:
+                        self.ema_model.update()
 
                     global_update += 1
                     progress_bar.update(1)
@@ -395,7 +414,7 @@ class Trainer:
                             if self.vocoder_name == "vocos":
                                 gen_audio = vocoder.decode(gen_mel_spec).cpu()
                                 ref_audio = vocoder.decode(ref_mel_spec).cpu()
-                            elif self.vocoder_name == "bigvgan":
+                            elif "bigvgan" in self.vocoder_name :
                                 gen_audio = vocoder(gen_mel_spec).squeeze(0).cpu()
                                 ref_audio = vocoder(ref_mel_spec).squeeze(0).cpu()
 
