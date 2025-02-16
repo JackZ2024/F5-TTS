@@ -79,6 +79,7 @@ def save_settings(
     mixed_precision,
     logger,
     ch_8bit_adam,
+    vocoder
 ):
     path_project = os.path.join(path_project_ckpts, project_name)
     os.makedirs(path_project, exist_ok=True)
@@ -104,6 +105,7 @@ def save_settings(
         "mixed_precision": mixed_precision,
         "logger": logger,
         "bnb_optimizer": ch_8bit_adam,
+        "vocoder": vocoder
     }
     with open(file_setting, "w") as f:
         json.dump(settings, f, indent=4)
@@ -116,102 +118,60 @@ def load_settings(project_name):
     path_project = os.path.join(path_project_ckpts, project_name)
     file_setting = os.path.join(path_project, "setting.json")
 
-    if not os.path.isfile(file_setting):
-        settings = {
-            "exp_name": "F5TTS_Base",
-            "learning_rate": 1e-05,
-            "batch_size_per_gpu": 1000,
-            "batch_size_type": "frame",
-            "max_samples": 64,
-            "grad_accumulation_steps": 1,
-            "max_grad_norm": 1,
-            "epochs": 100,
-            "num_warmup_updates": 2,
-            "save_per_updates": 300,
-            "keep_last_n_checkpoints": -1,
-            "last_per_updates": 100,
-            "finetune": True,
-            "file_checkpoint_train": "",
-            "tokenizer_type": "pinyin",
-            "tokenizer_file": "",
-            "mixed_precision": "none",
-            "logger": "wandb",
-            "bnb_optimizer": False,
-        }
-    else:
-        with open(file_setting, "r") as f:
-            settings = json.load(f)
-            if "logger" not in settings:
-                settings["logger"] = "wandb"
-            if "bnb_optimizer" not in settings:
-                settings["bnb_optimizer"] = False
-            if "keep_last_n_checkpoints" not in settings:
-                settings["keep_last_n_checkpoints"] = -1  # default to keep all checkpoints
-            if "last_per_updates" not in settings:  # patch for backward compatibility, with before f992c4e
-                settings["last_per_updates"] = settings["last_per_steps"] // settings["grad_accumulation_steps"]
+    # Default settings
+    default_settings = {
+        "exp_name": "F5TTS_Base",
+        "learning_rate": 1e-05,
+        "batch_size_per_gpu": 1000,
+        "batch_size_type": "frame",
+        "max_samples": 64,
+        "grad_accumulation_steps": 1,
+        "max_grad_norm": 1,
+        "epochs": 100,
+        "num_warmup_updates": 2,
+        "save_per_updates": 300,
+        "keep_last_n_checkpoints": -1,
+        "last_per_updates": 100,
+        "finetune": True,
+        "file_checkpoint_train": "",
+        "tokenizer_type": "pinyin",
+        "tokenizer_file": "",
+        "mixed_precision": "none",
+        "logger": "wandb",
+        "bnb_optimizer": False,
+        "vocoder": "vocos"
+    }
 
-    return  (
-        settings["exp_name"],
-        settings["learning_rate"],
-        settings["batch_size_per_gpu"],
-        settings["batch_size_type"],
-        settings["max_samples"],
-        settings["grad_accumulation_steps"],
-        settings["max_grad_norm"],
-        settings["epochs"],
-        settings["num_warmup_updates"],
-        settings["save_per_updates"],
-        settings["last_per_updates"],
-        settings["finetune"],
-        settings["file_checkpoint_train"],
-        settings["tokenizer_type"],
-        settings["tokenizer_file"],
-        settings["mixed_precision"],
-        settings["logger"],
-        settings["bnb_optimizer"],
-        settings["keep_last_n_checkpoints"],
+    # Load settings from file if it exists
+    if os.path.isfile(file_setting):
+        with open(file_setting, "r") as f:
+            file_settings = json.load(f)
+        default_settings.update(file_settings)
+
+    # Return as a tuple in the correct order
+    return (
+        default_settings["exp_name"],
+        default_settings["learning_rate"],
+        default_settings["batch_size_per_gpu"],
+        default_settings["batch_size_type"],
+        default_settings["max_samples"],
+        default_settings["grad_accumulation_steps"],
+        default_settings["max_grad_norm"],
+        default_settings["epochs"],
+        default_settings["num_warmup_updates"],
+        default_settings["save_per_updates"],
+        default_settings["keep_last_n_checkpoints"],
+        default_settings["last_per_updates"],
+        default_settings["finetune"],
+        default_settings["file_checkpoint_train"],
+        default_settings["tokenizer_type"],
+        default_settings["tokenizer_file"],
+        default_settings["mixed_precision"],
+        default_settings["logger"],
+        default_settings["bnb_optimizer"],
+        default_settings["vocoder"]
     )
 
-def load_settings_obj(project_name):
-    project_name = project_name.replace("_pinyin", "").replace("_char", "")
-    path_project = os.path.join(path_project_ckpts, project_name)
-    file_setting = os.path.join(path_project, "setting.json")
-
-    if not os.path.isfile(file_setting):
-        settings = {
-            "exp_name": "F5TTS_Base",
-            "learning_rate": 1e-05,
-            "batch_size_per_gpu": 1000,
-            "batch_size_type": "frame",
-            "max_samples": 64,
-            "grad_accumulation_steps": 1,
-            "max_grad_norm": 1,
-            "epochs": 100,
-            "num_warmup_updates": 2,
-            "save_per_updates": 300,
-            "keep_last_n_checkpoints": -1,
-            "last_per_updates": 100,
-            "finetune": True,
-            "file_checkpoint_train": "",
-            "tokenizer_type": "pinyin",
-            "tokenizer_file": "",
-            "mixed_precision": "none",
-            "logger": "wandb",
-            "bnb_optimizer": False,
-        }
-    else:
-        with open(file_setting, "r") as f:
-            settings = json.load(f)
-            if "logger" not in settings:
-                settings["logger"] = "wandb"
-            if "bnb_optimizer" not in settings:
-                settings["bnb_optimizer"] = False
-            if "keep_last_n_checkpoints" not in settings:
-                settings["keep_last_n_checkpoints"] = -1  # default to keep all checkpoints
-            if "last_per_updates" not in settings:  # patch for backward compatibility, with before f992c4e
-                settings["last_per_updates"] = settings["last_per_steps"] // settings["grad_accumulation_steps"]
-
-    return settings
 
 # Load metadata
 def get_audio_duration(audio_path):
@@ -426,6 +386,7 @@ def start_training(
     stream=False,
     logger="wandb",
     ch_8bit_adam=False,
+    vocoder="vocos"
 ):
     global training_process, tts_api, stop_signal
 
@@ -489,6 +450,7 @@ def start_training(
         f" --keep_last_n_checkpoints {keep_last_n_checkpoints}"
         f" --last_per_updates {last_per_updates}"
         f" --dataset_name {dataset_name}"
+        f" --vocoder {vocoder}"
     )
 
     if finetune:
@@ -530,6 +492,7 @@ def start_training(
         mixed_precision,
         logger,
         ch_8bit_adam,
+        vocoder
     )
 
     try:
@@ -588,7 +551,7 @@ def start_training(
                         output = stdout_queue.get_nowait()
                         print(output, end="")
                         match = re.search(
-                            r"Epoch (\d+)/(\d+):\s+(\d+)%\|.*\[(\d+:\d+)<.*?loss=(\d+\.\d+), step=(\d+)", output
+                            r"Epoch (\d+)/(\d+):\s+(\d+)%\|.*\[(\d+:\d+)<.*?loss=(\d+\.\d+), update=(\d+)", output
                         )
                         if match:
                             current_epoch = match.group(1)
@@ -596,13 +559,13 @@ def start_training(
                             percent_complete = match.group(3)
                             elapsed_time = match.group(4)
                             loss = match.group(5)
-                            current_step = match.group(6)
+                            current_update = match.group(6)
                             message = (
                                 f"Epoch: {current_epoch}/{total_epochs}, "
                                 f"Progress: {percent_complete}%, "
                                 f"Elapsed Time: {elapsed_time}, "
                                 f"Loss: {loss}, "
-                                f"Step: {current_step}"
+                                f"Update: {current_update}"
                             )
                             yield message, gr.update(interactive=False), gr.update(interactive=True)
                         elif output.strip():
@@ -890,7 +853,7 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
     with ArrowWriter(path=file_raw, writer_batch_size=1) as writer:
         for line in progress.tqdm(train_result, total=len(train_result), desc="prepare data"):
             writer.write(line)
-            
+
     with ArrowWriter(path=test_file_raw, writer_batch_size=1) as writer:
         for line in progress.tqdm(test_result, total=len(test_result), desc="prepare data"):
             writer.write(line)
@@ -1059,7 +1022,7 @@ def calculate_train(
 
 def extract_and_save_ema_model(checkpoint_path: str, new_checkpoint_path: str, safetensors: bool) -> str:
     try:
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, weights_only=True)
         print("Original Checkpoint Keys:", checkpoint.keys())
 
         ema_model_state_dict = checkpoint.get("ema_model_state_dict", None)
@@ -1168,7 +1131,9 @@ def vocab_extend(project_name, symbols, model_type):
     dataset_name = name_project.replace("_pinyin", "").replace("_char", "")
     new_ckpt_path = os.path.join(path_project_ckpts, dataset_name)
     os.makedirs(new_ckpt_path, exist_ok=True)
-    new_ckpt_file = os.path.join(new_ckpt_path, "model_1200000.pt")
+
+    # Add pretrained_ prefix to model when copying for consistency with finetune_cli.py
+    new_ckpt_file = os.path.join(new_ckpt_path, "pretrained_model_1200000.pt")
 
     size = expand_model_embeddings(ckpt_path, new_ckpt_file, num_new_tokens=vocab_size_new)
 
@@ -1329,12 +1294,22 @@ def get_checkpoints_project(project_name, is_gradio=True):
 
     if os.path.isdir(path_project_ckpts):
         files_checkpoints = glob(os.path.join(path_project_ckpts, project_name, "*.pt"))
-        files_checkpoints = sorted(
-            files_checkpoints,
-            key=lambda x: int(os.path.basename(x).split("_")[1].split(".")[0])
-            if os.path.basename(x) != "model_last.pt"
-            else float("inf"),
+        # Separate pretrained and regular checkpoints
+        pretrained_checkpoints = [f for f in files_checkpoints if "pretrained_" in os.path.basename(f)]
+        regular_checkpoints = [
+            f
+            for f in files_checkpoints
+            if "pretrained_" not in os.path.basename(f) and "model_last.pt" not in os.path.basename(f)
+        ]
+        last_checkpoint = [f for f in files_checkpoints if "model_last.pt" in os.path.basename(f)]
+
+        # Sort regular checkpoints by number
+        regular_checkpoints = sorted(
+            regular_checkpoints, key=lambda x: int(os.path.basename(x).split("_")[1].split(".")[0])
         )
+
+        # Combine in order: pretrained, regular, last
+        files_checkpoints = pretrained_checkpoints + regular_checkpoints + last_checkpoint
     else:
         files_checkpoints = []
 
@@ -1633,6 +1608,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
             with gr.Row():
                 exp_name = gr.Radio(label="Model", choices=["F5TTS_Base", "E2TTS_Base"], value="F5TTS_Base")
                 learning_rate = gr.Number(label="Learning Rate", value=1e-5, step=1e-5)
+                vocoder = gr.Radio(label="Vocoder", choices=["vocos", "bigvgan", "bigvgan44k"], value="vocos")
 
             with gr.Row():
                 batch_size_per_gpu = gr.Number(label="Batch Size per GPU", value=1000)
@@ -1659,33 +1635,56 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
             with gr.Row():
                 ch_8bit_adam = gr.Checkbox(label="Use 8-bit Adam optimizer")
-                mixed_precision = gr.Radio(label="mixed_precision", choices=["none", "fp16", "bf16"], value="none")
-                cd_logger = gr.Radio(label="logger", choices=["wandb", "tensorboard"], value="wandb")
+                mixed_precision = gr.Radio(label="mixed_precision", choices=["none", "fp16", "bf16"], value="fp16")
+                cd_logger = gr.Radio(label="logger", choices=["wandb", "tensorboard"], value="tensorboard")
                 start_button = gr.Button("Start Training")
                 stop_button = gr.Button("Stop Training", interactive=False)
 
             if projects_selelect is not None:
-                settings = load_settings_obj(projects_selelect)
+                (
+                    exp_name_value,
+                    learning_rate_value,
+                    batch_size_per_gpu_value,
+                    batch_size_type_value,
+                    max_samples_value,
+                    grad_accumulation_steps_value,
+                    max_grad_norm_value,
+                    epochs_value,
+                    num_warmup_updates_value,
+                    save_per_updates_value,
+                    keep_last_n_checkpoints_value,
+                    last_per_updates_value,
+                    finetune_value,
+                    file_checkpoint_train_value,
+                    tokenizer_type_value,
+                    tokenizer_file_value,
+                    mixed_precision_value,
+                    logger_value,
+                    bnb_optimizer_value,
+                    vocoder_value
+                ) = load_settings(projects_selelect)
 
-                exp_name.value = settings["exp_name"]
-                learning_rate.value = settings["learning_rate"]
-                batch_size_per_gpu.value = settings["batch_size_per_gpu"]
-                batch_size_type.value = settings["batch_size_type"]
-                max_samples.value = settings["max_samples"]
-                grad_accumulation_steps.value = settings["grad_accumulation_steps"]
-                max_grad_norm.value = settings["max_grad_norm"]
-                epochs.value = settings["epochs"]
-                num_warmup_updates.value = settings["num_warmup_updates"]
-                save_per_updates.value = settings["save_per_updates"]
-                keep_last_n_checkpoints.value = settings["keep_last_n_checkpoints"]
-                last_per_updates.value = settings["last_per_updates"]
-                ch_finetune.value = settings["finetune"]
-                file_checkpoint_train.value = settings["file_checkpoint_train"]
-                tokenizer_type.value = settings["tokenizer_type"]
-                tokenizer_file.value = settings["tokenizer_file"]
-                mixed_precision.value = settings["mixed_precision"]
-                cd_logger.value = settings["logger"]
-                ch_8bit_adam.value = settings["bnb_optimizer"]
+                # Assigning values to the respective components
+                exp_name.value = exp_name_value
+                learning_rate.value = learning_rate_value
+                batch_size_per_gpu.value = batch_size_per_gpu_value
+                batch_size_type.value = batch_size_type_value
+                max_samples.value = max_samples_value
+                grad_accumulation_steps.value = grad_accumulation_steps_value
+                max_grad_norm.value = max_grad_norm_value
+                epochs.value = epochs_value
+                num_warmup_updates.value = num_warmup_updates_value
+                save_per_updates.value = save_per_updates_value
+                keep_last_n_checkpoints.value = keep_last_n_checkpoints_value
+                last_per_updates.value = last_per_updates_value
+                ch_finetune.value = finetune_value
+                file_checkpoint_train.value = file_checkpoint_train_value
+                tokenizer_type.value = tokenizer_type_value
+                tokenizer_file.value = tokenizer_file_value
+                mixed_precision.value = mixed_precision_value
+                cd_logger.value = logger_value
+                ch_8bit_adam.value = bnb_optimizer_value
+                vocoder.value = vocoder_value
 
             ch_stream = gr.Checkbox(label="Stream Output Experiment", value=True)
             txt_info_train = gr.Text(label="Info", value="")
@@ -1746,6 +1745,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     ch_stream,
                     cd_logger,
                     ch_8bit_adam,
+                    vocoder
                 ],
                 outputs=[txt_info_train, start_button, stop_button],
             )
@@ -1781,27 +1781,27 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
             def setup_load_settings():
                 output_components = [
-                    exp_name,
-                    learning_rate,
-                    batch_size_per_gpu,
-                    batch_size_type,
-                    max_samples,
-                    grad_accumulation_steps,
-                    max_grad_norm,
-                    epochs,
-                    num_warmup_updates,
-                    save_per_updates,
-                    keep_last_n_checkpoints,
-                    last_per_updates,
-                    ch_finetune,
-                    file_checkpoint_train,
-                    tokenizer_type,
-                    tokenizer_file,
-                    mixed_precision,
-                    cd_logger,
-                    ch_8bit_adam
+                    exp_name,  # 1
+                    learning_rate,  # 2
+                    batch_size_per_gpu,  # 3
+                    batch_size_type,  # 4
+                    max_samples,  # 5
+                    grad_accumulation_steps,  # 6
+                    max_grad_norm,  # 7
+                    epochs,  # 8
+                    num_warmup_updates,  # 9
+                    save_per_updates,  # 10
+                    keep_last_n_checkpoints,  # 11
+                    last_per_updates,  # 12
+                    ch_finetune,  # 13
+                    file_checkpoint_train,  # 14
+                    tokenizer_type,  # 15
+                    tokenizer_file,  # 16
+                    mixed_precision,  # 17
+                    cd_logger,  # 18
+                    ch_8bit_adam,  # 19
+                    vocoder,     # 20
                 ]
-
                 return output_components
 
             outputs = setup_load_settings()

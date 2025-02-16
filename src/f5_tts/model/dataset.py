@@ -255,6 +255,8 @@ def load_dataset(
                 train_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
             if os.path.exists(f"{rel_data_path}/test_raw.arrow"):
                 test_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
+            else:
+                test_dataset = None
             preprocessed_mel = False
         elif audio_type == "mel":
             train_dataset = Dataset_.from_file(f"{rel_data_path}/mel.arrow")
