@@ -121,7 +121,7 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             state_dict.update(encodec_parameters)
         vocoder.load_state_dict(state_dict)
         vocoder = vocoder.eval().to(device)
-    elif vocoder_name == "bigvgan":
+    elif "bigvgan" in vocoder_name:
         try:
             from third_party.BigVGAN import bigvgan
         except ImportError:
@@ -130,7 +130,10 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             """download from https://huggingface.co/nvidia/bigvgan_v2_24khz_100band_256x/tree/main"""
             vocoder = bigvgan.BigVGAN.from_pretrained(local_path, use_cuda_kernel=False)
         else:
-            local_path = snapshot_download(repo_id="nvidia/bigvgan_v2_24khz_100band_256x", cache_dir=hf_cache_dir)
+            if vocoder_name == "bigvgan":
+                local_path = snapshot_download(repo_id="nvidia/bigvgan_v2_24khz_100band_256x", cache_dir=hf_cache_dir)
+            else:
+                local_path = snapshot_download(repo_id="nvidia/bigvgan_v2_44khz_128band_512x", cache_dir=hf_cache_dir)
             vocoder = bigvgan.BigVGAN.from_pretrained(local_path, use_cuda_kernel=False)
 
         vocoder.remove_weight_norm()
@@ -263,7 +266,7 @@ def load_model(
         vocab_char_map=vocab_char_map,
     ).to(device)
 
-    dtype = torch.float32 if mel_spec_type == "bigvgan" else None
+    dtype = torch.float32 if "bigvgan" in mel_spec_type else None
     model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
 
     return model
@@ -385,7 +388,9 @@ def infer_process(
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
-    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (17 - audio.shape[-1] / sr))
+    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (17*speed - audio.shape[-1] / sr))
+    print("max_chars", max_chars)
+    print("gen_chars", len(gen_text.encode('utf-8')))
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
@@ -481,6 +486,9 @@ def infer_batch_process(
                 gen_text_len = len(gen_text.encode("utf-8"))
                 duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
 
+        if duration > 17 * target_sample_rate / hop_length:
+            print(f"\033[31mToo long gen text({duration*hop_length/target_sample_rate}s): {gen_text}\033[0m")
+
         # inference
         with torch.inference_mode():
             generated, _ = model_obj.sample(
@@ -498,7 +506,7 @@ def infer_batch_process(
             generated_mel_spec = generated.permute(0, 2, 1)
             if mel_spec_type == "vocos":
                 generated_wave = vocoder.decode(generated_mel_spec)
-            elif mel_spec_type == "bigvgan":
+            elif "bigvgan" in mel_spec_type :
                 generated_wave = vocoder(generated_mel_spec)
             if rms < target_rms:
                 generated_wave = generated_wave * rms / target_rms

@@ -11,14 +11,13 @@ from f5_tts.model.utils import get_tokenizer
 from f5_tts.model.dataset import load_dataset
 from importlib.resources import files
 
-
 # -------------------------- Dataset Settings --------------------------- #
 target_sample_rate = 24000
 n_mel_channels = 100
 hop_length = 256
 win_length = 1024
 n_fft = 1024
-mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
+mel_spec_type = "vocos"  # 'vocos' or 'bigvgan' or 'bigvgan44k'
 
 
 # -------------------------- Argument Parsing --------------------------- #
@@ -78,7 +77,9 @@ def parse_args():
         action="store_true",
         help="Use 8-bit Adam optimizer from bitsandbytes",
     )
-
+    parser.add_argument("--vocoder",
+                        type=str,
+                        default='vocos')
     return parser.parse_args()
 
 
@@ -132,6 +133,14 @@ def main():
         tokenizer_path = args.dataset_name
 
     vocab_char_map, vocab_size = get_tokenizer(tokenizer_path, tokenizer)
+    global n_fft, hop_length, win_length, n_mel_channels, target_sample_rate, mel_spec_type
+    if args.vocoder == "bigvgan44k":  # 44k mel parameters is different
+        n_fft = 2048
+        hop_length = 512
+        win_length = 2048
+        n_mel_channels = 128
+        target_sample_rate = 44100
+    mel_spec_type = args.vocoder
 
     print("\nvocab : ", vocab_size)
     print("\nvocoder : ", mel_spec_type)
@@ -171,6 +180,7 @@ def main():
         log_samples=args.log_samples,
         last_per_updates=args.last_per_updates,
         bnb_optimizer=args.bnb_optimizer,
+        mel_spec_type=mel_spec_type
     )
 
     train_dataset, test_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
