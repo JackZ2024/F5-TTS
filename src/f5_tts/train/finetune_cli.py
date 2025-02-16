@@ -173,10 +173,11 @@ def main():
         bnb_optimizer=args.bnb_optimizer,
     )
 
-    train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
+    train_dataset, test_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
 
     trainer.train(
         train_dataset,
+        test_dataset,
         resumable_with_seed=666,  # seed for shuffling dataset
     )
 

@@ -59,7 +59,7 @@ cfg_strength = 2.0
 sway_sampling_coef = -1.0
 speed = 1.0
 fix_duration = None
-
+no_ref_audio = False
 # -----------------------------------------
 
 
@@ -301,7 +301,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
             non_silent_wave = AudioSegment.silent(duration=0)
             for non_silent_seg in non_silent_segs:
                 if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 15000:
-                    show_info("Audio is over 15s, clipping short. (1)")
+                    print("\033[31mAudio is over 15s, clipping short. (1)\033[0m")
                     break
                 non_silent_wave += non_silent_seg
 
@@ -313,7 +313,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
                 non_silent_wave = AudioSegment.silent(duration=0)
                 for non_silent_seg in non_silent_segs:
                     if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 15000:
-                        show_info("Audio is over 15s, clipping short. (2)")
+                        print("\033[31mAudio is over 15s, clipping short. (2)\033[0m")
                         break
                     non_silent_wave += non_silent_seg
 
@@ -322,7 +322,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
             # 3. if no proper silence found for clipping
             if len(aseg) > 15000:
                 aseg = aseg[:15000]
-                show_info("Audio is over 15s, clipping short. (3)")
+                print("\033[31mAudio is over 15s, clipping short. (3)\033[0m")
 
         aseg = remove_silence_edges(aseg) + AudioSegment.silent(duration=50)
         aseg.export(f.name, format="wav")
@@ -379,15 +379,20 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
-    lang=""
+    lang="",
+    no_ref_audio=no_ref_audio,
+    dur_model=None
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
-    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (25 - audio.shape[-1] / sr))
+    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (17 - audio.shape[-1] / sr))
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
     print("\n")
+
+    if len(gen_text_batches) > 1:
+        print(f"\033[31mToo long gen text: {gen_text}\033[0m")
 
     # show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return infer_batch_process(
@@ -406,7 +411,9 @@ def infer_process(
         speed=speed,
         fix_duration=fix_duration,
         device=device,
-        lang=lang
+        lang=lang,
+        no_ref_audio=no_ref_audio,
+        dur_model=dur_model
     )
 
 
@@ -429,7 +436,9 @@ def infer_batch_process(
     speed=1,
     fix_duration=None,
     device=None,
-    lang=""
+    lang="",
+    no_ref_audio=False,
+    dur_model = None
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -454,13 +463,23 @@ def infer_batch_process(
         final_text_list = convert_char_to_pinyin(text_list, polyphone=True, lang=lang)
 
         ref_audio_len = audio.shape[-1] // hop_length
-        if fix_duration is not None:
-            duration = int(fix_duration * target_sample_rate / hop_length)
-        else:
-            # Calculate duration
+        if dur_model is not None:
+            duration_in_sec = dur_model(audio, final_text_list)
+            frame_rate = model_obj.mel_spec.target_sample_rate // model_obj.mel_spec.hop_length
+            duration = (duration_in_sec * frame_rate / speed).to(torch.long).item()
+            print("dur model sec:", duration_in_sec.item())
             ref_text_len = len(ref_text.encode("utf-8"))
             gen_text_len = len(gen_text.encode("utf-8"))
-            duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
+            duration2 = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
+            print("estimate sec:", duration2 * hop_length / target_sample_rate)
+        else:
+            if fix_duration is not None:
+                duration = int(fix_duration * target_sample_rate / hop_length)
+            else:
+                # Calculate duration
+                ref_text_len = len(ref_text.encode("utf-8"))
+                gen_text_len = len(gen_text.encode("utf-8"))
+                duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
 
         # inference
         with torch.inference_mode():
@@ -471,7 +490,7 @@ def infer_batch_process(
                 steps=nfe_step,
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
-                # no_ref_audio=True
+                no_ref_audio=no_ref_audio
             )
 
             generated = generated.to(torch.float32)
