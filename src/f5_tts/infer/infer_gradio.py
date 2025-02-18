@@ -320,7 +320,7 @@ def infer(
     if not ref_audio_orig:
         gr.Warning("Please provide reference audio.")
         return gr.update(), gr.update(), ref_text
-    
+
     ref_audio, ref_text = preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=show_info)
 
     lang = ""
@@ -397,11 +397,11 @@ def infer(
             if save_line_audio:
                 sf.write(audio_filepath, final_wave, final_sample_rate, 'PCM_24')
 
-        # 如果按行保存了，就不再按文本框保存，如果没有按行保存，那就按文本框保存
-        if not save_line_audio:
-            final_waves = get_final_wave(cross_fade_duration, generated_waves[start_pos:], final_sample_rate)
-            audio_filepath = gen_audio_path + f"/gen_audio_{i}.wav"
-            sf.write(audio_filepath, final_waves, final_sample_rate, 'PCM_24')
+    # 如果按行保存了，就不再按文本框保存，如果没有按行保存，那就按文本框保存
+    if not save_line_audio:
+        final_waves = get_final_wave(cross_fade_duration, generated_waves[start_pos:], final_sample_rate)
+        audio_filepath = gen_audio_path + f"/gen_audio_{i}.wav"
+        sf.write(audio_filepath, final_waves, final_sample_rate, 'PCM_24')
 
     # 导出合并后的24Khz音频
     last_gen_audio_path = "last_audio/gen_audio.wav"
@@ -417,7 +417,7 @@ def infer(
         remove_silence_for_generated_wav(last_gen_audio_path)
         final_waves, _ = torchaudio.load(last_gen_audio_path)
         final_waves = final_waves.squeeze().cpu().numpy()
-    
+
     # Save the spectrogram
     # Create a combined spectrogram
     combined_spectrogram = np.concatenate(spectrograms, axis=1)
@@ -490,7 +490,7 @@ with gr.Blocks() as app_tts:
         )
         with gr.Row():
             remove_silence = gr.Checkbox(
-                label="删除静音",
+                    label="删除静音",
                 info="The model tends to produce silences, especially on longer audio. We can manually remove silences if needed. Note that this is an experimental feature and may produce strange results. This will also increase generation time.",
                 value=False,
             )
@@ -554,7 +554,7 @@ with gr.Blocks() as app_tts:
 
     intputs = [ref_audio_input, basic_ref_text_input, remove_silence, save_line_audio, \
                cross_fade_duration_slider, nfe_slider, speed_slider] + textboxes
-    
+
     generate_btn.click(
         basic_tts,
         inputs=intputs,
@@ -1168,10 +1168,10 @@ with gr.Blocks() as app:
         # 在这里添加新语言的支持，记得在languages里添加语言的英文对照
         language = gr.Dropdown(
             choices=list(models_dict.keys()), value="默认", label="语言", allow_custom_value=True
-        )
+            )
         ref_audio = gr.Dropdown(
             choices=[], value="", label="参考音频", allow_custom_value=True
-        )
+            )
     with gr.Row():
         custom_ckpt_path = gr.Dropdown(
             choices=[DEFAULT_TTS_MODEL_CFG[0]],
