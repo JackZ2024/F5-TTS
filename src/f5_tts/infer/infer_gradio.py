@@ -1252,7 +1252,7 @@ with gr.Blocks() as app:
     is_flag=True,
     help="Share the app via Gradio share link",
 )
-@click.option("--api", "-a", default=True, is_flag=True, help="Allow API access")
+@click.option("--api", "-a", default=False, is_flag=True, help="Allow API access")
 @click.option(
     "--root_path",
     "-r",
