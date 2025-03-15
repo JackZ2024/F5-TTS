@@ -397,11 +397,11 @@ def infer(
             if save_line_audio:
                 sf.write(audio_filepath, final_wave, final_sample_rate, 'PCM_24')
 
-    # 如果按行保存了，就不再按文本框保存，如果没有按行保存，那就按文本框保存
-    if not save_line_audio:
-        final_waves = get_final_wave(cross_fade_duration, generated_waves[start_pos:], final_sample_rate)
-        audio_filepath = gen_audio_path + f"/gen_audio_{i}.wav"
-        sf.write(audio_filepath, final_waves, final_sample_rate, 'PCM_24')
+        # 如果按行保存了，就不再按文本框保存，如果没有按行保存，那就按文本框保存
+        if not save_line_audio:
+            final_waves = get_final_wave(cross_fade_duration, generated_waves[start_pos:], final_sample_rate)
+            audio_filepath = gen_audio_path + f"/gen_audio_{i}.wav"
+            sf.write(audio_filepath, final_waves, final_sample_rate, 'PCM_24')
 
     # 导出合并后的24Khz音频
     last_gen_audio_path = "last_audio/gen_audio.wav"
@@ -457,7 +457,7 @@ with gr.Blocks() as app_credits:
 """)
 with gr.Blocks() as app_tts:
     gr.Markdown("# Batched TTS")
-    ref_audio_input = gr.Audio(label="Reference Audio", type="filepath")
+    ref_audio_input = gr.Textbox(label="Reference Audio")
     with gr.Row():
         num_input = gr.Textbox(label="请输入需要的输入框数量(1-20)", value="5")
         generate_textbox_btn = gr.Button("生成输入框")
@@ -503,7 +503,7 @@ with gr.Blocks() as app_tts:
             label="语速设置",
             minimum=0.3,
             maximum=2.0,
-            value=0.9,
+            value=0.8,
             step=0.1,
             info="Adjust the speed of the audio.",
         )
@@ -524,9 +524,9 @@ with gr.Blocks() as app_tts:
             info="Set the duration of the cross-fade between audio clips.",
         )
 
-    audio_output = gr.Audio(label="合成音频")
-    spectrogram_output = gr.Image(label="Spectrogram")
-    download_output = gr.File(label="下载文件")
+    # audio_output = gr.Audio(label="合成音频")
+    # spectrogram_output = gr.Image(label="Spectrogram")
+    download_output = gr.Textbox(label="下载文件")
 
     @gpu_decorator
     def basic_tts(
@@ -550,7 +550,7 @@ with gr.Blocks() as app_tts:
             speed=speed_slider,
             save_line_audio=save_line_audio,
         )
-        return audio_out, spectrogram_path, ref_text_out, gen_audio_path
+        return gen_audio_path
 
     intputs = [ref_audio_input, basic_ref_text_input, remove_silence, save_line_audio, \
                cross_fade_duration_slider, nfe_slider, speed_slider] + textboxes
@@ -558,488 +558,8 @@ with gr.Blocks() as app_tts:
     generate_btn.click(
         basic_tts,
         inputs=intputs,
-        outputs=[audio_output, spectrogram_output, basic_ref_text_input, download_output],
+        outputs=[download_output],
     )
-
-
-def parse_speechtypes_text(gen_text):
-    # Pattern to find {speechtype}
-    pattern = r"\{(.*?)\}"
-
-    # Split the text by the pattern
-    tokens = re.split(pattern, gen_text)
-
-    segments = []
-
-    current_style = "Regular"
-
-    for i in range(len(tokens)):
-        if i % 2 == 0:
-            # This is text
-            text = tokens[i].strip()
-            if text:
-                segments.append({"style": current_style, "text": text})
-        else:
-            # This is style
-            style = tokens[i].strip()
-            current_style = style
-
-    return segments
-
-
-with gr.Blocks() as app_multistyle:
-    # New section for multistyle generation
-    gr.Markdown(
-        """
-    # Multiple Speech-Type Generation
-
-    This section allows you to generate multiple speech types or multiple people's voices. Enter your text in the format shown below, and the system will generate speech using the appropriate type. If unspecified, the model will use the regular speech type. The current speech type will be used until the next speech type is specified.
-    """
-    )
-
-    with gr.Row():
-        gr.Markdown(
-            """
-            **Example Input:**                                                                      
-            {Regular} Hello, I'd like to order a sandwich please.                                                         
-            {Surprised} What do you mean you're out of bread?                                                                      
-            {Sad} I really wanted a sandwich though...                                                              
-            {Angry} You know what, darn you and your little shop!                                                                       
-            {Whisper} I'll just go back home and cry now.                                                                           
-            {Shouting} Why me?!                                                                         
-            """
-        )
-
-        gr.Markdown(
-            """
-            **Example Input 2:**                                                                                
-            {Speaker1_Happy} Hello, I'd like to order a sandwich please.                                                            
-            {Speaker2_Regular} Sorry, we're out of bread.                                                                                
-            {Speaker1_Sad} I really wanted a sandwich though...                                                                             
-            {Speaker2_Whisper} I'll give you the last one I was hiding.                                                                     
-            """
-        )
-
-    gr.Markdown(
-        "Upload different audio clips for each speech type. The first speech type is mandatory. You can add additional speech types by clicking the 'Add Speech Type' button."
-    )
-
-    # Regular speech type (mandatory)
-    with gr.Row() as regular_row:
-        with gr.Column():
-            regular_name = gr.Textbox(value="Regular", label="Speech Type Name")
-            regular_insert = gr.Button("Insert Label", variant="secondary")
-        regular_audio = gr.Audio(label="Regular Reference Audio", type="filepath")
-        regular_ref_text = gr.Textbox(label="Reference Text (Regular)", lines=2)
-
-    # Regular speech type (max 100)
-    max_speech_types = 100
-    speech_type_rows = [regular_row]
-    speech_type_names = [regular_name]
-    speech_type_audios = [regular_audio]
-    speech_type_ref_texts = [regular_ref_text]
-    speech_type_delete_btns = [None]
-    speech_type_insert_btns = [regular_insert]
-
-    # Additional speech types (99 more)
-    for i in range(max_speech_types - 1):
-        with gr.Row(visible=False) as row:
-            with gr.Column():
-                name_input = gr.Textbox(label="Speech Type Name")
-                delete_btn = gr.Button("Delete Type", variant="secondary")
-                insert_btn = gr.Button("Insert Label", variant="secondary")
-            audio_input = gr.Audio(label="Reference Audio", type="filepath")
-            ref_text_input = gr.Textbox(label="Reference Text", lines=2)
-        speech_type_rows.append(row)
-        speech_type_names.append(name_input)
-        speech_type_audios.append(audio_input)
-        speech_type_ref_texts.append(ref_text_input)
-        speech_type_delete_btns.append(delete_btn)
-        speech_type_insert_btns.append(insert_btn)
-
-    # Button to add speech type
-    add_speech_type_btn = gr.Button("Add Speech Type")
-
-    # Keep track of autoincrement of speech types, no roll back
-    speech_type_count = 1
-
-    # Function to add a speech type
-    def add_speech_type_fn():
-        row_updates = [gr.update() for _ in range(max_speech_types)]
-        global speech_type_count
-        if speech_type_count < max_speech_types:
-            row_updates[speech_type_count] = gr.update(visible=True)
-            speech_type_count += 1
-        else:
-            gr.Warning("Exhausted maximum number of speech types. Consider restart the app.")
-        return row_updates
-
-    add_speech_type_btn.click(add_speech_type_fn, outputs=speech_type_rows)
-
-    # Function to delete a speech type
-    def delete_speech_type_fn():
-        return gr.update(visible=False), None, None, None
-
-    # Update delete button clicks
-    for i in range(1, len(speech_type_delete_btns)):
-        speech_type_delete_btns[i].click(
-            delete_speech_type_fn,
-            outputs=[speech_type_rows[i], speech_type_names[i], speech_type_audios[i], speech_type_ref_texts[i]],
-        )
-
-    # Text input for the prompt
-    gen_text_input_multistyle = gr.Textbox(
-        label="Text to Generate",
-        lines=10,
-        placeholder="Enter the script with speaker names (or emotion types) at the start of each block, e.g.:\n\n{Regular} Hello, I'd like to order a sandwich please.\n{Surprised} What do you mean you're out of bread?\n{Sad} I really wanted a sandwich though...\n{Angry} You know what, darn you and your little shop!\n{Whisper} I'll just go back home and cry now.\n{Shouting} Why me?!",
-    )
-
-    def make_insert_speech_type_fn(index):
-        def insert_speech_type_fn(current_text, speech_type_name):
-            current_text = current_text or ""
-            speech_type_name = speech_type_name or "None"
-            updated_text = current_text + f"{{{speech_type_name}}} "
-            return updated_text
-
-        return insert_speech_type_fn
-
-    for i, insert_btn in enumerate(speech_type_insert_btns):
-        insert_fn = make_insert_speech_type_fn(i)
-        insert_btn.click(
-            insert_fn,
-            inputs=[gen_text_input_multistyle, speech_type_names[i]],
-            outputs=[gen_text_input_multistyle],
-        )
-
-    with gr.Accordion("Advanced Settings", open=False):
-        remove_silence_multistyle = gr.Checkbox(
-            label="Remove Silences",
-            value=True,
-        )
-
-    # Generate button
-    generate_multistyle_btn = gr.Button("Generate Multi-Style Speech", variant="primary")
-
-    # Output audio
-    audio_output_multistyle = gr.Audio(label="Synthesized Audio")
-
-    @gpu_decorator
-    def generate_multistyle_speech(
-        gen_text,
-        *args,
-    ):
-        speech_type_names_list = args[:max_speech_types]
-        speech_type_audios_list = args[max_speech_types : 2 * max_speech_types]
-        speech_type_ref_texts_list = args[2 * max_speech_types : 3 * max_speech_types]
-        remove_silence = args[3 * max_speech_types]
-        # Collect the speech types and their audios into a dict
-        speech_types = OrderedDict()
-
-        ref_text_idx = 0
-        for name_input, audio_input, ref_text_input in zip(
-            speech_type_names_list, speech_type_audios_list, speech_type_ref_texts_list
-        ):
-            if name_input and audio_input:
-                speech_types[name_input] = {"audio": audio_input, "ref_text": ref_text_input}
-            else:
-                speech_types[f"@{ref_text_idx}@"] = {"audio": "", "ref_text": ""}
-            ref_text_idx += 1
-
-        # Parse the gen_text into segments
-        segments = parse_speechtypes_text(gen_text)
-
-        # For each segment, generate speech
-        generated_audio_segments = []
-        current_style = "Regular"
-
-        for segment in segments:
-            style = segment["style"]
-            text = segment["text"]
-
-            if style in speech_types:
-                current_style = style
-            else:
-                gr.Warning(f"Type {style} is not available, will use Regular as default.")
-                current_style = "Regular"
-
-            try:
-                ref_audio = speech_types[current_style]["audio"]
-            except KeyError:
-                gr.Warning(f"Please provide reference audio for type {current_style}.")
-                return [None] + [speech_types[style]["ref_text"] for style in speech_types]
-            ref_text = speech_types[current_style].get("ref_text", "")
-
-            # Generate speech for this segment
-            audio_out, _, ref_text_out = infer(
-                ref_audio, ref_text, text, tts_model_choice, remove_silence, 0, show_info=print
-            )  # show_info=print no pull to top when generating
-            sr, audio_data = audio_out
-
-            generated_audio_segments.append(audio_data)
-            speech_types[current_style]["ref_text"] = ref_text_out
-
-        # Concatenate all audio segments
-        if generated_audio_segments:
-            final_audio_data = np.concatenate(generated_audio_segments)
-            return [(sr, final_audio_data)] + [speech_types[style]["ref_text"] for style in speech_types]
-        else:
-            gr.Warning("No audio generated.")
-            return [None] + [speech_types[style]["ref_text"] for style in speech_types]
-
-    generate_multistyle_btn.click(
-        generate_multistyle_speech,
-        inputs=[
-            gen_text_input_multistyle,
-        ]
-        + speech_type_names
-        + speech_type_audios
-        + speech_type_ref_texts
-        + [
-            remove_silence_multistyle,
-        ],
-        outputs=[audio_output_multistyle] + speech_type_ref_texts,
-    )
-
-    # Validation function to disable Generate button if speech types are missing
-    def validate_speech_types(gen_text, regular_name, *args):
-        speech_type_names_list = args
-
-        # Collect the speech types names
-        speech_types_available = set()
-        if regular_name:
-            speech_types_available.add(regular_name)
-        for name_input in speech_type_names_list:
-            if name_input:
-                speech_types_available.add(name_input)
-
-        # Parse the gen_text to get the speech types used
-        segments = parse_speechtypes_text(gen_text)
-        speech_types_in_text = set(segment["style"] for segment in segments)
-
-        # Check if all speech types in text are available
-        missing_speech_types = speech_types_in_text - speech_types_available
-
-        if missing_speech_types:
-            # Disable the generate button
-            return gr.update(interactive=False)
-        else:
-            # Enable the generate button
-            return gr.update(interactive=True)
-
-    gen_text_input_multistyle.change(
-        validate_speech_types,
-        inputs=[gen_text_input_multistyle, regular_name] + speech_type_names,
-        outputs=[generate_multistyle_btn],
-    )
-
-
-with gr.Blocks() as app_chat:
-    gr.Markdown(
-        """
-# Voice Chat
-Have a conversation with an AI using your reference voice! 
-1. Upload a reference audio clip and optionally its transcript.
-2. Load the chat model.
-3. Record your message through your microphone.
-4. The AI will respond using the reference voice.
-"""
-    )
-
-    if not USING_SPACES:
-        load_chat_model_btn = gr.Button("Load Chat Model", variant="primary")
-
-        chat_interface_container = gr.Column(visible=False)
-
-        @gpu_decorator
-        def load_chat_model():
-            global chat_model_state, chat_tokenizer_state
-            if chat_model_state is None:
-                show_info = gr.Info
-                show_info("Loading chat model...")
-                model_name = "Qwen/Qwen2.5-3B-Instruct"
-                chat_model_state = AutoModelForCausalLM.from_pretrained(
-                    model_name, torch_dtype="auto", device_map="auto"
-                )
-                chat_tokenizer_state = AutoTokenizer.from_pretrained(model_name)
-                show_info("Chat model loaded.")
-
-            return gr.update(visible=False), gr.update(visible=True)
-
-        load_chat_model_btn.click(load_chat_model, outputs=[load_chat_model_btn, chat_interface_container])
-
-    else:
-        chat_interface_container = gr.Column()
-
-        if chat_model_state is None:
-            model_name = "Qwen/Qwen2.5-3B-Instruct"
-            chat_model_state = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
-            chat_tokenizer_state = AutoTokenizer.from_pretrained(model_name)
-
-    with chat_interface_container:
-        with gr.Row():
-            with gr.Column():
-                ref_audio_chat = gr.Audio(label="Reference Audio", type="filepath")
-            with gr.Column():
-                with gr.Accordion("Advanced Settings", open=False):
-                    remove_silence_chat = gr.Checkbox(
-                        label="Remove Silences",
-                        value=True,
-                    )
-                    ref_text_chat = gr.Textbox(
-                        label="Reference Text",
-                        info="Optional: Leave blank to auto-transcribe",
-                        lines=2,
-                    )
-                    system_prompt_chat = gr.Textbox(
-                        label="System Prompt",
-                        value="You are not an AI assistant, you are whoever the user says you are. You must stay in character. Keep your responses concise since they will be spoken out loud.",
-                        lines=2,
-                    )
-
-        chatbot_interface = gr.Chatbot(label="Conversation", type='messages')
-
-        with gr.Row():
-            with gr.Column():
-                audio_input_chat = gr.Microphone(
-                    label="Speak your message",
-                    type="filepath",
-                )
-                audio_output_chat = gr.Audio(autoplay=True)
-            with gr.Column():
-                text_input_chat = gr.Textbox(
-                    label="Type your message",
-                    lines=1,
-                )
-                send_btn_chat = gr.Button("Send Message")
-                clear_btn_chat = gr.Button("Clear Conversation")
-
-        conversation_state = gr.State(
-            value=[
-                {
-                    "role": "system",
-                    "content": "You are not an AI assistant, you are whoever the user says you are. You must stay in character. Keep your responses concise since they will be spoken out loud.",
-                }
-            ]
-        )
-
-        # Modify process_audio_input to use model and tokenizer from state
-        @gpu_decorator
-        def process_audio_input(audio_path, text, history, conv_state):
-            """Handle audio or text input from user"""
-
-            if not audio_path and not text.strip():
-                return history, conv_state, ""
-
-            if audio_path:
-                text = preprocess_ref_audio_text(audio_path, text)[1]
-
-            if not text.strip():
-                return history, conv_state, ""
-
-            conv_state.append({"role": "user", "content": text})
-            history.append((text, None))
-
-            response = generate_response(conv_state, chat_model_state, chat_tokenizer_state)
-
-            conv_state.append({"role": "assistant", "content": response})
-            history[-1] = (text, response)
-
-            return history, conv_state, ""
-
-        @gpu_decorator
-        def generate_audio_response(history, ref_audio, ref_text, remove_silence):
-            """Generate TTS audio for AI response"""
-            if not history or not ref_audio:
-                return None
-
-            last_user_message, last_ai_response = history[-1]
-            if not last_ai_response:
-                return None
-
-            audio_result, _, ref_text_out = infer(
-                ref_audio,
-                ref_text,
-                last_ai_response,
-                tts_model_choice,
-                remove_silence,
-                cross_fade_duration=0.15,
-                speed=1.0,
-                show_info=print,  # show_info=print no pull to top when generating
-            )
-            return audio_result, ref_text_out
-
-        def clear_conversation():
-            """Reset the conversation"""
-            return [], [
-                {
-                    "role": "system",
-                    "content": "You are not an AI assistant, you are whoever the user says you are. You must stay in character. Keep your responses concise since they will be spoken out loud.",
-                }
-            ]
-
-        def update_system_prompt(new_prompt):
-            """Update the system prompt and reset the conversation"""
-            new_conv_state = [{"role": "system", "content": new_prompt}]
-            return [], new_conv_state
-
-        # Handle audio input
-        audio_input_chat.stop_recording(
-            process_audio_input,
-            inputs=[audio_input_chat, text_input_chat, chatbot_interface, conversation_state],
-            outputs=[chatbot_interface, conversation_state],
-        ).then(
-            generate_audio_response,
-            inputs=[chatbot_interface, ref_audio_chat, ref_text_chat, remove_silence_chat],
-            outputs=[audio_output_chat, ref_text_chat],
-        ).then(
-            lambda: None,
-            None,
-            audio_input_chat,
-        )
-
-        # Handle text input
-        text_input_chat.submit(
-            process_audio_input,
-            inputs=[audio_input_chat, text_input_chat, chatbot_interface, conversation_state],
-            outputs=[chatbot_interface, conversation_state],
-        ).then(
-            generate_audio_response,
-            inputs=[chatbot_interface, ref_audio_chat, ref_text_chat, remove_silence_chat],
-            outputs=[audio_output_chat, ref_text_chat],
-        ).then(
-            lambda: None,
-            None,
-            text_input_chat,
-        )
-
-        # Handle send button
-        send_btn_chat.click(
-            process_audio_input,
-            inputs=[audio_input_chat, text_input_chat, chatbot_interface, conversation_state],
-            outputs=[chatbot_interface, conversation_state],
-        ).then(
-            generate_audio_response,
-            inputs=[chatbot_interface, ref_audio_chat, ref_text_chat, remove_silence_chat],
-            outputs=[audio_output_chat, ref_text_chat],
-        ).then(
-            lambda: None,
-            None,
-            text_input_chat,
-        )
-
-        # Handle clear button
-        clear_btn_chat.click(
-            clear_conversation,
-            outputs=[chatbot_interface, conversation_state],
-        )
-
-        # Handle system prompt change and reset conversation
-        system_prompt_chat.change(
-            update_system_prompt,
-            inputs=[system_prompt_chat],
-            outputs=[chatbot_interface, conversation_state],
-        )
-
 
 with gr.Blocks() as app:
     gr.Markdown(
@@ -1237,8 +757,8 @@ with gr.Blocks() as app:
     switch_tts_model("Custom")
 
     gr.TabbedInterface(
-        [app_tts, app_multistyle, app_chat, app_credits],
-        ["Basic-TTS", "Multi-Speech", "Voice-Chat", "Credits"],
+        [app_tts, app_credits],
+        ["Basic-TTS", "Credits"],
     )
 
 
