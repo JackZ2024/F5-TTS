@@ -708,7 +708,7 @@ with gr.Blocks() as app_multistyle:
         insert_btn.click(
             insert_fn,
             inputs=[gen_text_input_multistyle, speech_type_names[i]],
-            outputs=gen_text_input_multistyle,
+            outputs=[gen_text_input_multistyle],
         )
 
     with gr.Accordion("Advanced Settings", open=False):
@@ -829,7 +829,7 @@ with gr.Blocks() as app_multistyle:
     gen_text_input_multistyle.change(
         validate_speech_types,
         inputs=[gen_text_input_multistyle, regular_name] + speech_type_names,
-        outputs=generate_multistyle_btn,
+        outputs=[generate_multistyle_btn],
     )
 
 
@@ -896,7 +896,7 @@ Have a conversation with an AI using your reference voice!
                         lines=2,
                     )
 
-        chatbot_interface = gr.Chatbot(label="Conversation")
+        chatbot_interface = gr.Chatbot(label="Conversation", type='messages')
 
         with gr.Row():
             with gr.Column():
@@ -1036,7 +1036,7 @@ Have a conversation with an AI using your reference voice!
         # Handle system prompt change and reset conversation
         system_prompt_chat.change(
             update_system_prompt,
-            inputs=system_prompt_chat,
+            inputs=[system_prompt_chat],
             outputs=[chatbot_interface, conversation_state],
         )
 
